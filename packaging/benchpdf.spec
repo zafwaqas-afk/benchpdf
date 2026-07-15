@@ -1,0 +1,73 @@
+# -*- mode: python ; coding: utf-8 -*-
+# PyInstaller spec for BenchPDF (onedir, windowed / no console).
+import os
+from PyInstaller.utils.hooks import collect_all, collect_submodules
+
+ROOT = os.path.abspath(os.getcwd())  # run pyinstaller from repo root
+R = lambda p: os.path.join(ROOT, p)
+
+# ---- data files bundled into the app ----
+datas = [
+    (R("app/templates"), "app/templates"),
+    (R("app/static"), "app/static"),                    # includes vendored fonts
+    (R("tests/fidelity_suite.py"), "tests"),
+    (R("tests/fidelity/golden.json"), "tests/fidelity"),
+    (R("LICENSE"), "."),
+    (R("THIRD_PARTY_LICENSES.md"), "."),
+    # SYNTHETIC fixtures only - the confidential fixture used in private dev is deliberately excluded
+    (R("tests/fixtures/text_report.pdf"), "tests/fixtures"),
+    (R("tests/fixtures/tables_charts.pdf"), "tests/fixtures"),
+    (R("tests/fixtures/slide_deck.pdf"), "tests/fixtures"),
+]
+
+binaries = []
+hiddenimports = [
+    # app modules imported dynamically inside route handlers / diagnostics
+    "app.server", "app.converter", "app.extraction", "app.edit_model",
+    "app.pdf_edit_export", "app.fonts_local", "app.office_com", "app.registry",
+    "app.convert_images", "app.convert_web", "app.convert_pdf_misc",
+    "app.licenses", "app.version", "fidelity_suite",
+    # pywin32 / COM
+    "win32com", "win32com.client", "win32timezone", "pythoncom", "pywintypes",
+    # tray backend
+    "pystray._win32",
+]
+
+# pull data+binaries+submodules for the fiddly native/optional-import packages
+for pkg in ("fitz", "pymupdf", "pptx", "docx", "img2pdf", "pillow_heif", "PIL",
+            "fontTools", "flask", "jinja2", "werkzeug"):
+    try:
+        d, b, h = collect_all(pkg)
+        datas += d; binaries += b; hiddenimports += h
+    except Exception:
+        pass
+
+a = Analysis(
+    [R("benchpdf.py")],
+    pathex=[ROOT],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    runtime_hooks=[],
+    excludes=["tkinter", "reportlab", "pikepdf", "playwright", "PyInstaller", "pytest"],
+    noarchive=False,
+)
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz, a.scripts, [],
+    exclude_binaries=True,
+    name="BenchPDF",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=False,                       # no console window
+    icon=R("packaging/benchpdf.ico"),
+    version=R("packaging/version_info.txt"),
+)
+coll = COLLECT(
+    exe, a.binaries, a.datas,
+    strip=False, upx=False, name="BenchPDF",
+)

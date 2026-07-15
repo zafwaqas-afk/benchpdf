@@ -1,0 +1,26 @@
+# Virtual env and caches
+venv/
+venv_backup/
+__pycache__/
+*.pyc
+
+# Transient conversion working area and generated outputs
+_work/
+tests/output/
+tests/shots/
+tests/shots_hub/
+tests/compare/
+tests/input/_img*.png
+tests/input/_scan*.png
+
+# NOTE: tests/fixtures/ IS committed on purpose (regression fixtures: a
+# text-heavy doc, a table-heavy doc, and a slide-style doc). This is the
+# public source copy — a confidential real-world fixture used in the
+# private development repo is deliberately excluded here.
+
+# Packaging build outputs (large; rebuildable)
+build/
+dist/
+dist_installer/
+packaging/build/
+*.spec.bak

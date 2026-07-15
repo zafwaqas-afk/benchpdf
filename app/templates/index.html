@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en" data-theme="">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BenchPDF · convert and edit documents</title>
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+        href="{{ url_for('static', filename='fonts/IBMPlexSans-Regular.woff2') }}">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+        href="{{ url_for('static', filename='fonts/IBMPlexSans-Medium.woff2') }}">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+        href="{{ url_for('static', filename='fonts/IBMPlexSerif-SemiBold.woff2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script>
+    /* set theme before paint to avoid a flash */
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem("benchpdf-theme"); } catch (e) {}
+      if (t) document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
+</head>
+<body>
+  <!-- ============================ Header ============================ -->
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="BenchPDF home">
+      <svg class="brand-mark" viewBox="0 0 20 20" aria-hidden="true" width="20" height="20">
+        <rect x="2.5" y="1.5" width="15" height="17" rx="1.5" fill="none"
+              stroke="currentColor" stroke-width="1.3"/>
+        <line x1="10" y1="1.5" x2="10" y2="18.5" stroke="currentColor" stroke-width="1.3"/>
+      </svg>
+      BenchPDF
+    </a>
+    <nav class="topnav" aria-label="Primary">
+      <button type="button" class="navlink is-active" id="nav-convert">Convert</button>
+      <button type="button" class="navlink" id="nav-edit">Edit</button>
+      <button type="button" class="navlink" id="nav-about">About</button>
+    </nav>
+    <button type="button" class="theme-toggle" id="theme-toggle"
+            aria-label="Switch colour theme" title="Switch theme">
+      <svg class="i-sun" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none">
+        <circle cx="12" cy="12" r="4.2" stroke="currentColor" stroke-width="1.6"/>
+        <path d="M12 2.5v2.2M12 19.3v2.2M4.2 12H2M22 12h-2.2M5 5l1.6 1.6M17.4 17.4 19 19M19 5l-1.6 1.6M6.6 17.4 5 19"
+              stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+      <svg class="i-moon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none">
+        <path d="M20 14.2A8 8 0 1 1 9.8 4 6.4 6.4 0 0 0 20 14.2Z"
+              stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </header>
+
+  <!-- ============================ Convert surface ============================ -->
+  <main class="main" id="home" data-state="idle">
+
+    <section class="hero">
+      <h1 class="hero-title">Convert and edit documents, on your device.</h1>
+      <p class="hero-sub">PDF, Word, Excel, PowerPoint, images, and web pages.
+        Turned into the format you need, or edited in place.</p>
+
+      <div class="dropzone" id="dropzone" role="button" tabindex="0"
+           aria-label="Drop a file here, or press Enter to choose one">
+        <div class="dz-inner">
+          <svg class="dz-icon" viewBox="0 0 24 24" width="26" height="26" fill="none" aria-hidden="true">
+            <path d="M12 15.5V4m0 0 4 4m-4-4-4 4" stroke="currentColor"
+                  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M4.5 15v3A2.5 2.5 0 0 0 7 20.5h10A2.5 2.5 0 0 0 19.5 18v-3"
+                  stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <p class="dz-title">Drop a file to begin</p>
+          <p class="dz-sub">PDF, Word, Excel, PowerPoint, or images.
+            Or <button type="button" class="linkbtn" id="browse">choose a file</button></p>
+        </div>
+        <input id="file" type="file" multiple hidden>
+      </div>
+
+      <div class="url-row">
+        <label class="url-label" for="url-input">Or convert a web page</label>
+        <div class="url-field">
+          <input type="text" id="url-input" class="url-input" inputmode="url"
+                 placeholder="example.com/report" autocomplete="off" spellcheck="false">
+          <button type="button" class="btn btn-ghost" id="url-go">Convert to PDF</button>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Actions revealed after a file is chosen -->
+    <section class="panel actions" id="actions" aria-labelledby="actions-h">
+      <div class="rule"></div>
+      <div class="actions-head">
+        <div class="file-id">
+          <span class="file-type" id="act-type">PDF</span>
+          <span class="file-name" id="act-name">document.pdf</span>
+          <span class="file-size" id="act-size"></span>
+        </div>
+        <button type="button" class="linkbtn" id="act-cancel">Choose a different file</button>
+      </div>
+      <h2 class="section-h" id="actions-h">What would you like to do?</h2>
+      <div class="action-grid" id="action-list"></div>
+      <div class="action-extra" id="action-extra" hidden></div>
+      <p class="action-note" id="action-skipped" hidden></p>
+    </section>
+
+    <!-- Working: queue + determinate progress -->
+    <section class="panel working" id="working" aria-live="polite">
+      <div class="rule"></div>
+      <div class="work-head">
+        <div class="work-count"><span class="num" id="work-num">0</span><span
+          class="work-of">/</span><span class="num" id="work-total">0</span></div>
+        <div class="work-meta">
+          <div class="work-phase" id="work-phase">Preparing…</div>
+          <div class="work-target" id="work-target"></div>
+        </div>
+      </div>
+      <div class="track"><div class="track-fill" id="work-fill"></div></div>
+      <ul class="filelist" id="work-list"></ul>
+    </section>
+
+    <!-- Done: result cards -->
+    <section class="panel done" id="done">
+      <div class="rule"></div>
+      <div class="done-head">
+        <svg class="i-check" viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
+          <path d="m5 12.5 4.3 4.3L19 7.2" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <h2 class="section-h" id="done-title">Done</h2>
+      </div>
+      <div class="notice notice-warn" id="scan-notice" hidden>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
+          <path d="M12 8.5v4.2m0 3.1h.01M12 3.4 2.7 19.6h18.6L12 3.4Z" stroke="currentColor"
+                stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span id="scan-text"></span>
+      </div>
+      <ul class="resultlist" id="result-list"></ul>
+      <div class="report" id="report" hidden>
+        <div class="report-head">
+          <span class="report-title">Per-page report</span>
+          <span class="report-sum" id="report-sum"></span>
+        </div>
+        <div class="table-wrap">
+          <table class="rep">
+            <thead><tr><th class="c-pg">Page</th><th>Mode</th><th>Elements</th></tr></thead>
+            <tbody id="report-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="done-actions">
+        <button type="button" class="btn btn-ghost" id="done-more">Convert another file</button>
+      </div>
+    </section>
+
+    <!-- Error -->
+    <section class="panel errorpanel" id="errorpanel">
+      <div class="rule"></div>
+      <div class="err-head">
+        <svg class="i-alert" viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M12 7.5v5.2m0 3.3h.01" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+        <h2 class="section-h" id="err-title">Something didn't work</h2>
+      </div>
+      <p class="err-body" id="err-body"></p>
+      <button type="button" class="btn btn-ghost" id="err-retry">Try another file</button>
+    </section>
+
+    <!-- Below the fold: all conversions -->
+    <section class="allconv" id="allconv" aria-labelledby="allconv-h">
+      <div class="rule"></div>
+      <h2 class="section-h subtle" id="allconv-h">All conversions</h2>
+      <div class="conv-cols">
+        <div class="conv-col">
+          <h3 class="conv-col-h">To PDF</h3>
+          <div class="conv-list" id="grid-to"></div>
+        </div>
+        <div class="conv-col">
+          <h3 class="conv-col-h">From PDF</h3>
+          <div class="conv-list" id="grid-from"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>BenchPDF</span>
+  </footer>
+
+  <!-- ============================ About dialog ============================ -->
+  <div class="scrim" id="about-scrim" hidden></div>
+  <div class="dialog about-dialog" id="about-dialog" role="dialog" aria-modal="true"
+       aria-labelledby="about-h" hidden>
+    <div class="dialog-head">
+      <h2 class="dialog-h" id="about-h">About BenchPDF</h2>
+      <button type="button" class="icon-btn" id="about-close" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
+          <path d="m6 6 12 12M18 6 6 18" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <p class="about-ver">BenchPDF <span id="about-version" class="mono">1.0.0</span></p>
+      <p id="about-privacy"></p>
+      <p class="about-office" id="about-office"></p>
+      <div class="about-legal">
+        <div class="about-legal-row"><span>License</span><span class="mono" id="about-license">GNU AGPL-3.0</span></div>
+        <div class="about-legal-row"><span>Source</span><a class="mono" id="about-source" href="#" target="_blank" rel="noopener">available</a></div>
+      </div>
+      <details class="about-deps">
+        <summary>Open-source components</summary>
+        <ul id="about-deps-list" class="about-deps-list"></ul>
+        <p class="about-deps-note">BenchPDF bundles PyMuPDF (AGPL-3.0), so the whole app
+          is offered under the AGPL-3.0 and its source is available above.</p>
+      </details>
+    </div>
+  </div>
+
+  <!-- ============================ Editor surface ============================ -->
+  <section class="editor" id="editor" hidden aria-label="PDF editor">
+    <header class="ed-bar">
+      <button class="ed-back" id="ed-back" type="button">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true">
+          <path d="M14.5 5 8 12l6.5 7" stroke="currentColor" stroke-width="1.6"
+                stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Done
+      </button>
+      <div class="ed-file"><span class="ed-name" id="ed-name">document.pdf</span></div>
+      <div class="ed-tools">
+        <span class="ed-hint" id="ed-hint">Click any text to edit</span>
+        <button class="btn btn-ghost btn-sm" id="ed-add" type="button">Add text box</button>
+        <button class="btn btn-ghost btn-sm" id="ed-pptx" type="button">Download PowerPoint</button>
+        <button class="btn btn-primary btn-sm" id="ed-export" type="button">Export PDF</button>
+      </div>
+    </header>
+    <div class="ed-scroll" id="ed-scroll"><div class="ed-pages" id="ed-pages"></div></div>
+
+    <div class="scrim" id="ed-scrim" hidden></div>
+    <div class="dialog ed-dialog" id="ed-overlay" role="dialog" aria-modal="true"
+         aria-labelledby="ed-ov-title" hidden>
+      <div class="dialog-body ed-ov-body">
+        <div class="ed-spinner" id="ed-spinner" aria-hidden="true"></div>
+        <svg class="ed-ov-check" id="ed-ov-check" viewBox="0 0 24 24" width="24" height="24" fill="none" hidden aria-hidden="true">
+          <path d="m5 12.5 4.3 4.3L19 7.2" stroke="currentColor" stroke-width="1.9"
+                stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="ed-ov-title" id="ed-ov-title">Exporting…</div>
+        <div class="ed-ov-msg" id="ed-ov-msg"></div>
+        <div class="ed-ov-actions" id="ed-ov-actions" hidden>
+          <a class="btn btn-primary btn-sm" id="ed-dl" href="#" download>Download PDF</a>
+          <button class="btn btn-ghost btn-sm" id="ed-open" type="button">Open</button>
+          <button class="btn btn-ghost btn-sm" id="ed-ov-close" type="button">Keep editing</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='edit.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+#!/bin/sh
+# Fidelity regression guard.
+# If any engine / extraction / editor-export / conversion code is staged, the
+# fidelity suite must pass before the commit is allowed. No engine change ships
+# without a green suite.
+
+changed=$(git diff --cached --name-only)
+echo "$changed" | grep -Eq '^app/(extraction|converter|edit_model|pdf_edit_export|fonts_local)\.py$|^tests/fidelity_suite\.py$|^tests/fixtures/'
+if [ $? -ne 0 ]; then
+  exit 0   # nothing engine-related staged; skip the suite
+fi
+
+echo "[pre-commit] engine code changed — running fidelity suite..."
+PY="venv/Scripts/python.exe"
+if [ ! -f "$PY" ]; then PY="python"; fi
+
+"$PY" tests/fidelity_suite.py
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "[pre-commit] BLOCKED: the fidelity suite is RED. Fix the regression, or"
+  echo "             re-bless the golden layout intentionally with:"
+  echo "               $PY tests/fidelity_suite.py --update-golden"
+  echo "             (only when the layout change is deliberate and reviewed)."
+  exit 1
+fi
+echo "[pre-commit] fidelity suite GREEN."
+exit 0
