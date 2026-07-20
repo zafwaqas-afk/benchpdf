@@ -22,6 +22,7 @@ datas = [
     (R("tests/fixtures/slide_deck.pdf"), "tests/fixtures"),
     (R("tests/fixtures/bank_statement.pdf"), "tests/fixtures"),
     (R("tests/fixtures/form_xobject_statement.pdf"), "tests/fixtures"),
+    (R("tests/fixtures/styled_proposal.pdf"), "tests/fixtures"),
 ]
 
 binaries = []
