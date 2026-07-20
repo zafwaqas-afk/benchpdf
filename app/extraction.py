@@ -172,7 +172,17 @@ def _collect_lines(text_dict) -> list:
                 "size": max(sizes),
                 "x0": bbox[0], "y0": bbox[1], "x1": bbox[2], "y1": bbox[3],
             })
-    return lines
+    # Overprinted text (the same run drawn twice for weight or shadow) must
+    # extract once. The browser engine applies the same rule.
+    seen, out = set(), []
+    for ln in lines:
+        key = ("".join(s["text"] for s in ln["spans"]),
+               round(ln["x0"], 1), round(ln["y0"], 1), round(ln["size"], 1))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(ln)
+    return out
 
 
 def _line_alignment(lines, region_x0, region_x1):

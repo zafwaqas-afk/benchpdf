@@ -285,18 +285,19 @@ def check_degenerate_geometry(prs, res, name):
     footer text boxes at the page origin with zero height (fixture:
     form_xobject_statement).
     """
-    zero_h, piled = 0, 0
+    zero_dim, piled = 0, 0
     for slide in prs.slides:
         origins = {}
         for sh in slide.shapes:
             if sh.has_text_frame and sh.text_frame.text.strip():
-                if sh.height == 0:
-                    zero_h += 1
+                if sh.height == 0 or sh.width == 0:
+                    zero_dim += 1
                 key = (sh.left, sh.top)
                 origins[key] = origins.get(key, 0) + 1
         piled += sum(1 for v in origins.values() if v > 2)
-    res.check(zero_h == 0, f"[{name}] no zero-height text elements (found: {zero_h})")
+    res.check(zero_dim == 0, f"[{name}] no zero-height or zero-width text elements (found: {zero_dim})")
     res.check(piled == 0, f"[{name}] no more than 2 text elements share an origin (piles: {piled})")
+    return zero_dim == 0
 
 
 def check_effective_sizes(prs, src_pdf, res, name):
@@ -412,15 +413,20 @@ def run_pptx(engine, update_golden=False):
             res.check(False, f"[{name}] engine '{engine.name}' raised: {type(e).__name__}: {e}")
             continue
         prs = Presentation(out)
+        geometry_sound = check_degenerate_geometry(prs, res, name)
         check_fragments(prs, res, name)
         check_slashes(prs, src, res, name)
         check_tables(prs, src, res, name)
         check_text_insets(prs, res, name)
         check_fonts(prs, src, res, name)
         check_graphics(prs, src, res, name)
-        check_degenerate_geometry(prs, res, name)
         check_effective_sizes(prs, src, res, name)
-        check_overlap_bounds(prs, res, name)
+        if geometry_sound:
+            check_overlap_bounds(prs, res, name)
+        else:
+            # overlap over zero-sized elements is vacuous; fail it loudly so a
+            # broken geometry invariant can never mask a broken overlap one
+            res.check(False, f"[{name}] overlap check NOT RUN: masked by degenerate geometry")
         if update_golden:
             new_golden[name] = layout_signature(prs)
         else:
