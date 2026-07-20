@@ -33,6 +33,7 @@ Usage:
 import glob
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -41,12 +42,15 @@ sys.path.insert(0, os.path.join(HERE, ".."))
 import fitz
 from pptx import Presentation
 from pptx.util import Emu
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from app.converter import convert_pdf_to_pptx
 from app.edit_model import EditSession
 from app.pdf_edit_export import export_edited_pdf
 from app.convert_pdf_misc import pdf_to_images, pdf_to_text
+from tests.engines import ENGINES, EngineUnavailable
 
+NL = chr(10)
 FIX = os.path.join(HERE, "fixtures")
 GOLD = os.path.join(HERE, "fidelity", "golden.json")
 # Writable work area; overridable so a frozen/packaged build can point it at a
@@ -169,33 +173,162 @@ def check_slashes(prs, src_pdf, res, name):
               f"[{name}] no fabricated ' / ' joins (out={out.count(' / ')}, src={src.count(' / ')})")
 
 
-def check_tables(report, res, name):
-    mism = [p.page_number for p in report.pages
-            if p.mode != "image-only" and p.tables < _pdf_table_count(report.source_pdf, p.page_number - 1)]
-    res.check(not mism, f"[{name}] every PDF table is native (short pages: {mism})")
+def _native_tables(prs):
+    return sum(1 for sl in prs.slides for sh in sl.shapes if sh.has_table)
 
 
-def _pdf_table_count(src, index):
-    try:
-        doc = fitz.open(src)
-        n = len([t for t in doc[index].find_tables(strategy="lines").tables
-                 if t.row_count >= 1 and t.col_count >= 1])
-        doc.close()
-        return n
-    except Exception:
-        return 0
+def check_tables(prs, src_pdf, res, name):
+    """Every table the PDF detects must arrive as a NATIVE PowerPoint table.
+
+    Derived from the .pptx and the source PDF, not from any engine's own report,
+    so the same assertion holds for an engine that reports nothing.
+    """
+    doc = fitz.open(src_pdf)
+    want = sum(len([t for t in doc[i].find_tables(strategy="lines").tables
+                    if t.row_count >= 1 and t.col_count >= 1])
+               for i in range(doc.page_count))
+    doc.close()
+    got = _native_tables(prs)
+    res.check(got >= want,
+              f"[{name}] every PDF table is native (source {want}, output {got})")
 
 
-def check_fonts(report, res, name):
-    mapping = {}
-    consistent = True
-    for entry in report.all_substituted_fonts:
-        if " -> " in entry:
-            a, b = entry.split(" -> ", 1)
-            if a in mapping and mapping[a] != b:
-                consistent = False
-            mapping[a] = b
-    res.check(consistent, f"[{name}] font mapping consistent (each source -> one target)")
+def _family(font_name):
+    """Reduce a PDF font name to its family.
+
+    PDF font names encode weight and style ('Helvetica-Bold', 'ABCDEF+Arial,BoldItalic')
+    while PowerPoint carries those as run properties, so comparing raw names would
+    call a correct conversion a collapse. Compare families; check weight separately.
+    """
+    n = re.sub(r"^[A-Z]{6}[+]", "", font_name or "")
+    n = re.split(r"[-,]", n)[0]
+    return re.sub(r"(?i)(bold|italic|oblique|light|regular|medium|semibold)$", "", n).strip().lower()
+
+
+def check_fonts(prs, src_pdf, res, name):
+    """The output must not collapse every source family onto one font.
+
+    A converter that hardcodes a single fontFace passes every positional check
+    while destroying the document's typography. Asserted against the .pptx and
+    the source PDF, so it holds for any engine, reporting or not.
+    """
+    doc = fitz.open(src_pdf)
+    src = set()
+    for i in range(doc.page_count):
+        for blk in doc[i].get_text("dict")["blocks"]:
+            for ln in blk.get("lines", []):
+                for sp in ln["spans"]:
+                    src.add(_family(sp["font"]))
+    doc.close()
+
+    out, bold_runs = set(), 0
+    for sl in prs.slides:
+        for sh in sl.shapes:
+            if not sh.has_text_frame:
+                continue
+            for para in sh.text_frame.paragraphs:
+                for r in para.runs:
+                    if r.font.name:
+                        out.add(_family(r.font.name))
+                    if r.font.bold:
+                        bold_runs += 1
+
+    want = min(len(src), 2)
+    res.check(len(out) >= want,
+              f"[{name}] font families not collapsed "
+              f"(source {len(src)}, output {len(out)}: {sorted(out)})")
+
+    # Weight is the other half of typography, and the half a family-level check
+    # would otherwise let through.
+    doc = fitz.open(src_pdf)
+    src_bold = any("bold" in (sp["font"] or "").lower()
+                   for i in range(doc.page_count)
+                   for blk in doc[i].get_text("dict")["blocks"]
+                   for ln in blk.get("lines", [])
+                   for sp in ln["spans"])
+    doc.close()
+    if src_bold:
+        res.check(bold_runs > 0,
+                  f"[{name}] bold weight survives (bold runs in output: {bold_runs})")
+    else:
+        res.skip(f"[{name}] no bold in source")
+
+
+def check_graphics(prs, src_pdf, res, name):
+    """Pages with a graphic layer must not arrive as bare text.
+
+    The failure this catches: an engine that emits only text boxes, so fills,
+    rules, charts and table shading silently vanish from every slide.
+    """
+    doc = fitz.open(src_pdf)
+    pages_with_art = []
+    for i in range(doc.page_count):
+        page = doc[i]
+        if len(page.get_drawings()) >= 3 or page.get_images():
+            pages_with_art.append(i)
+    doc.close()
+    if not pages_with_art:
+        res.skip(f"[{name}] no graphic layer in source")
+        return
+    carriers = sum(1 for sl in prs.slides for sh in sl.shapes
+                   if sh.has_table or sh.shape_type == MSO_SHAPE_TYPE.PICTURE
+                   or getattr(sh, "fill", None) is not None and not sh.has_text_frame)
+    res.check(carriers > 0,
+              f"[{name}] graphic layer preserved "
+              f"({len(pages_with_art)} source pages have art, output carriers: {carriers})")
+
+
+def check_degenerate_geometry(prs, res, name):
+    """No zero-height text elements; no pile-ups at one origin.
+
+    Guards the form-XObject bug class: an un-composed transform stack stacked
+    footer text boxes at the page origin with zero height (fixture:
+    form_xobject_statement).
+    """
+    zero_h, piled = 0, 0
+    for slide in prs.slides:
+        origins = {}
+        for sh in slide.shapes:
+            if sh.has_text_frame and sh.text_frame.text.strip():
+                if sh.height == 0:
+                    zero_h += 1
+                key = (sh.left, sh.top)
+                origins[key] = origins.get(key, 0) + 1
+        piled += sum(1 for v in origins.values() if v > 2)
+    res.check(zero_h == 0, f"[{name}] no zero-height text elements (found: {zero_h})")
+    res.check(piled == 0, f"[{name}] no more than 2 text elements share an origin (piles: {piled})")
+
+
+def check_effective_sizes(prs, src_pdf, res, name):
+    """Every output font size matches a SOURCE span's effective size within
+    0.5pt, and nothing dips under 4pt unless the source truly has it. A
+    transform-scale corruption fails both instantly."""
+    doc = fitz.open(src_pdf)
+    src_sizes = set()
+    for i in range(doc.page_count):
+        for blk in doc[i].get_text("dict")["blocks"]:
+            for ln in blk.get("lines", []):
+                for sp in ln["spans"]:
+                    if sp["text"].strip():
+                        src_sizes.add(round(sp["size"], 2))
+    doc.close()
+
+    bad, tiny = [], []
+    for slide in prs.slides:
+        for sh in slide.shapes:
+            if not sh.has_text_frame:
+                continue
+            for para in sh.text_frame.paragraphs:
+                for r in para.runs:
+                    if r.font.size is None or not r.text.strip():
+                        continue
+                    pt = r.font.size.pt
+                    if not any(abs(pt - ss) <= 0.5 for ss in src_sizes):
+                        bad.append(round(pt, 2))
+                    if pt < 4 and not any(ss < 4.5 for ss in src_sizes):
+                        tiny.append(round(pt, 2))
+    res.check(not bad, f"[{name}] output sizes match source within 0.5pt (alien: {sorted(set(bad))[:6]})")
+    res.check(not tiny, f"[{name}] no sub-4pt sizes the source lacks (found: {sorted(set(tiny))[:6]})")
 
 
 def check_overlap_bounds(prs, res, name):
@@ -244,30 +377,49 @@ def check_golden(prs, golden, res, name):
             countmis += 1
             continue
         for cb, rb in zip(cs, rs):
-            worst = max(worst, abs(cb[0] - rb[0]), abs(cb[1] - rb[1]))
+            # position AND size: a width error (lost or phantom advance) is
+            # exactly how the form-XObject bug class shows up in output
+            worst = max(worst, *(abs(a - b) for a, b in zip(cb, rb)))
     res.check(countmis == 0, f"[{name}] golden box counts per slide match (mismatched slides: {countmis})")
     res.check(worst <= POS_TOL, f"[{name}] text-box drift within {POS_TOL*100:.0f}% (worst: {worst*100:.2f}%)")
 
 
 # --------------------------------------------------------------------------- #
-def run_pptx(update_golden=False):
-    print("\n== PDF -> PPTX ==")
+def run_pptx(engine, update_golden=False):
+    """Run the placement invariants for one engine over every fixture.
+
+    The golden layout is the Python engine's blessed output. Holding a second
+    engine to the same golden is exactly the parity assertion we want: if the
+    browser engine emits 57 boxes where Python emits 5, the box-count check
+    fails, which is the whole point.
+    """
+    print(NL + "== PDF -> PPTX [%s: %s] ==" % (engine.name, engine.label))
     res = Result()
+    res.engine = engine.name
     golden = {}
     if os.path.exists(GOLD):
         golden = json.load(open(GOLD))
     new_golden = dict(golden)
     for src in sorted(glob.glob(os.path.join(FIX, "*.pdf"))):
         name = os.path.splitext(os.path.basename(src))[0]
-        out = os.path.join(WORK, name + ".pptx")
-        report = convert_pdf_to_pptx(src, out)
-        report.source_pdf = src
+        out = os.path.join(WORK, f"{name}.{engine.name}.pptx")
+        try:
+            engine.convert(src, out)
+        except EngineUnavailable as e:
+            res.skip(f"[{name}] engine '{engine.name}' unavailable: {e}")
+            continue
+        except Exception as e:
+            res.check(False, f"[{name}] engine '{engine.name}' raised: {type(e).__name__}: {e}")
+            continue
         prs = Presentation(out)
         check_fragments(prs, res, name)
         check_slashes(prs, src, res, name)
-        check_tables(report, res, name)
+        check_tables(prs, src, res, name)
         check_text_insets(prs, res, name)
-        check_fonts(report, res, name)
+        check_fonts(prs, src, res, name)
+        check_graphics(prs, src, res, name)
+        check_degenerate_geometry(prs, res, name)
+        check_effective_sizes(prs, src, res, name)
         check_overlap_bounds(prs, res, name)
         if update_golden:
             new_golden[name] = layout_signature(prs)
@@ -359,28 +511,74 @@ def run_other_paths():
 
 def main():
     update = "--update-golden" in sys.argv
-    results = [run_pptx(update_golden=update)]
-    if not update:
-        results.append(run_editor())
-        results.append(run_other_paths())
 
-    print("\n" + "=" * 62)
-    all_ok = True
-    for res in results:
-        for ok, label in res.checks:
-            print(f"  [{'PASS' if ok else 'FAIL'}] {label}")
-            all_ok = all_ok and ok
-        for s in res.skips:
-            print(f"  [SKIP] {s}")
-    total = sum(len(r.checks) for r in results)
-    passed = sum(1 for r in results for ok, _ in r.checks if ok)
-    print("=" * 62)
+    # --engines python,browser   (default: every registered engine)
+    sel = None
+    for a in sys.argv:
+        if a.startswith("--engines="):
+            sel = [x.strip() for x in a.split("=", 1)[1].split(",") if x.strip()]
+    names = sel or list(ENGINES)
+    unknown = [n for n in names if n not in ENGINES]
+    if unknown:
+        print("Unknown engine(s):", ", ".join(unknown))
+        print("Registered:", ", ".join(ENGINES))
+        sys.exit(2)
+    engines = [ENGINES[n] for n in names]
+
     if update:
+        run_pptx(ENGINES["python"], update_golden=True)
         print("Golden layout updated. Re-run without --update-golden to verify.")
         return
-    print(f"{passed}/{total} checks passed")
-    print("FIDELITY SUITE: " + ("GREEN — all invariants hold" if all_ok else "RED — regression detected"))
-    sys.exit(0 if all_ok else 1)
+
+    per_engine = {e.name: run_pptx(e) for e in engines}
+    shared = [run_editor(), run_other_paths()]
+
+    print(NL + "=" * 62)
+    for name, res in per_engine.items():
+        print(NL + "-- engine: %s --" % name)
+        for ok, label in res.checks:
+            print(f"  [{'PASS' if ok else 'FAIL'}] {label}")
+        for sk in res.skips:
+            print(f"  [SKIP] {sk}")
+    print(NL + "-- engine-independent --")
+    for res in shared:
+        for ok, label in res.checks:
+            print(f"  [{'PASS' if ok else 'FAIL'}] {label}")
+        for sk in res.skips:
+            print(f"  [SKIP] {sk}")
+
+    # ---- per-engine summary table ----
+    print(NL + "=" * 62)
+    print("PDF -> PPTX, per engine")
+    print(f"  {'engine':<10} {'ships':<7} {'passed':>8}  {'failed':>7}  verdict")
+    print("  " + "-" * 56)
+    blocking = False
+    for e in engines:
+        res = per_engine[e.name]
+        ok = sum(1 for k, _ in res.checks if k)
+        bad = sum(1 for k, _ in res.checks if not k)
+        if not res.checks:
+            verdict = "NOT RUN"
+        elif bad == 0:
+            verdict = "GREEN"
+        elif e.ships:
+            verdict = "RED (SHIPS: BLOCKING)"
+            blocking = True
+        else:
+            verdict = "RED (quarantined, not linked)"
+        print(f"  {e.name:<10} {'yes' if e.ships else 'no':<7} {ok:>8}  {bad:>7}  {verdict}")
+
+    shared_ok = all(k for r in shared for k, _ in r.checks)
+    if not shared_ok:
+        blocking = True
+    total = sum(len(r.checks) for r in list(per_engine.values()) + shared)
+    passed = sum(1 for r in list(per_engine.values()) + shared for k, _ in r.checks if k)
+    print("=" * 62)
+    print(f"{passed}/{total} checks passed across {len(engines)} engine(s)")
+    print("FIDELITY SUITE: " + ("GREEN - every shipping engine holds every invariant"
+                                if not blocking else
+                                "RED - a SHIPPING engine failed. Do not ship."))
+    sys.exit(1 if blocking else 0)
 
 
 if __name__ == "__main__":

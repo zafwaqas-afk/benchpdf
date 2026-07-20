@@ -1,7 +1,11 @@
 @echo off
 REM ============================================================
 REM  Fidelity regression suite — double-click to run.
-REM  Asserts the conversion engine's placement invariants on the
+REM  Runs the SAME fixtures and the SAME assertions against EVERY
+REM  registered engine (tests/engines.py). An engine that is not in
+REM  that registry may not be linked from the site.
+REM
+REM  Asserts each engine's placement invariants on the
 REM  committed fixtures (no overlap, no fragmentation, native
 REM  tables, zero insets, consistent fonts, golden-layout drift).
 REM  No engine change should ship unless this ends GREEN.
@@ -20,16 +24,16 @@ if not exist "%VENV_PY%" (
 
 echo Running the conversion fidelity suite...
 echo.
-"%VENV_PY%" "%~dp0tests\fidelity_suite.py"
+"%VENV_PY%" "%~dp0tests\fidelity_suite.py" %*
 set RC=%errorlevel%
 echo.
 if %RC%==0 (
   echo ============================================================
-  echo   RESULT: GREEN - all fidelity invariants hold.
+  echo   RESULT: GREEN - every SHIPPING engine holds every invariant.
   echo ============================================================
 ) else (
   echo ============================================================
-  echo   RESULT: RED - a regression was detected. Do not ship.
+  echo   RESULT: RED - a SHIPPING engine regressed. Do not ship.
   echo   Scroll up for the failing checks.
   echo ============================================================
 )

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>JS engine harness</title></head>
+<body>
+<!--
+  Suite harness for the browser PDF->PPTX engine. Loads THE SITE'S engine
+  (assets/js/engine/engine.js) against the real vendored libraries at the
+  real versions, so what the suite measures is what would actually ship.
+  tests/engines.py serves the site directory alongside this file and calls
+  window.convertToPptx().
+-->
+<script src="/assets/vendor/jszip.min.js"></script>
+<script src="/assets/vendor/pptxgen.min.js"></script>
+<script src="/assets/vendor/pdf-lib.min.js"></script>
+<script type="module">
+  import * as pdfjs from "/assets/vendor/pdfjs/pdf.min.mjs";
+  import { convertPdfToPptx } from "/assets/js/engine/engine.js";
+
+  pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdfjs/pdf.worker.min.mjs";
+
+  window.convertToPptx = async (bytes) => {
+    const buf = new Uint8Array(bytes).buffer;
+    const { blob } = await convertPdfToPptx(buf, {
+      pdfjs, PptxGenJS: window.PptxGenJS, PDFLib: window.PDFLib, JSZip: window.JSZip,
+    });
+    const out = new Uint8Array(await blob.arrayBuffer());
+    let s = "";
+    const CHUNK = 0x8000;
+    for (let i = 0; i < out.length; i += CHUNK) {
+      s += String.fromCharCode.apply(null, out.subarray(i, i + CHUNK));
+    }
+    return btoa(s);
+  };
+  window.harnessReady = true;
+</script>
+</body>
+</html>

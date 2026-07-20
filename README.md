@@ -145,10 +145,23 @@ the SIL Open Font License — no fonts are loaded from a network at runtime.
 Conversion quality (text placement, tables, fonts) is protected by an
 automated **fidelity suite**. **No engine change ships without a green suite.**
 
+**Every engine, same fixtures, same assertions.** The suite is multi-engine:
+it runs identical checks against every engine registered in
+`tests/engines.py` and reports per-engine columns. `python` is this desktop
+engine; `browser` drives the website's ported JS engine in headless Chromium
+against the site's real vendored libraries (it needs Playwright and a checkout
+of the benchpdf-site repo next to this one, or `BENCHPDF_SITE_DIR`).
+
+> **The rule: a converter that is not in `tests/engines.py` with a GREEN
+> column may not be linked from the website.** An engine marked
+> `ships = True` that fails any invariant exits non-zero and blocks release.
+
 - **Run it:** double-click **`run-tests.bat`**, or
   `venv\Scripts\python tests\fidelity_suite.py`.
 - **What it asserts** on the committed fixtures in `tests/fixtures/`
-  (a text-heavy doc, a table-heavy doc, and a slide-style doc), for both the
+  (a text-heavy doc, a table-heavy doc, a slide-style doc, a dense synthetic
+  bank statement, and a form-XObject statement guarding a transform-stack
+  bug found in the field), for both the
   **PDF → PPTX** and **editor export** paths:
   paragraph-level blocks (no line fragments), no fabricated `" / "` joins,
   every detected table rebuilt as a native table, **zero text-box insets**,

@@ -188,6 +188,11 @@ def _fill_cell(cell, para_lines, fonts: FontMapper, fill_rgb, is_dark):
     tf = cell.text_frame
     tf.word_wrap = True
     if not para_lines:
+        # An empty cell still carries a paragraph, and without an explicit size
+        # PowerPoint reserves line height for its 18pt default, silently
+        # inflating every sparse row until dense tables overflow the slide.
+        # (Found by the phase-3 render comparison against the browser engine.)
+        tf.paragraphs[0].font.size = Pt(6)
         return
     para_lines = sorted(para_lines, key=lambda l: (round(l["y0"], 1), l["x0"]))
     paras = _split_paragraphs(para_lines)
@@ -229,6 +234,7 @@ def _add_table(slide, table, page_lines, pix, z, scale, off_x, off_y, fonts: Fon
             cell = table_obj.cell(ri, ci)
             if cb is None:
                 cell.fill.background()
+                cell.text_frame.paragraphs[0].font.size = Pt(6)
                 continue
             fill = _sample_fill(pix, cb, z)
             is_dark = (fill[0] + fill[1] + fill[2]) < 384

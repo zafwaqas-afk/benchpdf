@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>extraction harness</title></head>
+<body>
+<!-- Phase-1 harness: exposes the JS extraction layer for the parity check. -->
+<script src="/assets/vendor/pdf-lib.min.js"></script>
+<script type="module">
+  import * as pdfjs from "/assets/vendor/pdfjs/pdf.min.mjs";
+  import { initOps, extractLines, extractVectors, renderBackground, renderFull }
+    from "/assets/js/engine/extract.js";
+  import { embeddedFontMetrics } from "/assets/js/engine/fontmetrics.js";
+  import { attachMarkers, clusterLines } from "/assets/js/engine/cluster.js";
+  import { detectTables } from "/assets/js/engine/tables.js";
+
+  pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdfjs/pdf.worker.min.mjs";
+  initOps(pdfjs);
+
+  window.dumpExtraction = async (url) => {
+    const bytes = await (await fetch(location.origin + url)).arrayBuffer();
+    const metrics = await embeddedFontMetrics(bytes, window.PDFLib);
+    const doc = await pdfjs.getDocument({ data: bytes.slice(0) }).promise;
+    const pages = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const opList = await page.getOperatorList();
+      const lines = await extractLines(page, opList, metrics);
+      const vec = extractVectors(page, opList);
+      pages.push({
+        w: vec.pageW, h: vec.pageH,
+        lines: lines.map((l) => ({
+          bbox: l.bbox.map((v) => Math.round(v * 100) / 100),
+          text: l.spans.map((s) => s.text).join(""),
+          size: Math.round(l.size * 100) / 100,
+          fonts: [...new Set(l.spans.map((s) => s.font))],
+          flags: l.spans.map((s) => s.flags),
+        })),
+        nSegments: vec.segments.length,
+        nDrawings: vec.drawings.length,
+        images: vec.images.map((im) => [im.x0, im.y0, im.x1, im.y1].map((v) => Math.round(v * 10) / 10)),
+      });
+    }
+    return pages;
+  };
+
+  window.dumpBackground = async (url, pageNo, dpi) => {
+    const doc = await pdfjs.getDocument({ url: location.origin + url }).promise;
+    const page = await doc.getPage(pageNo);
+    const opList = await page.getOperatorList();
+    const bg = await renderBackground(page, opList, dpi);
+    const full = await renderFull(page, dpi);
+    return { bg: bg.toDataURL("image/png"), full: full.toDataURL("image/png") };
+  };
+  window.dumpPlacement = async (url) => {
+    const bytes = await (await fetch(location.origin + url)).arrayBuffer();
+    const metrics = await embeddedFontMetrics(bytes, window.PDFLib);
+    const doc = await pdfjs.getDocument({ data: bytes.slice(0) }).promise;
+    const pages = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const opList = await page.getOperatorList();
+      const lines = await extractLines(page, opList, metrics);
+      const vec = extractVectors(page, opList);
+      const tables = detectTables(vec.segments);
+      const inTable = (ln) => tables.some((t) =>
+        ((ln.bbox[0] + ln.bbox[2]) / 2) >= t.bbox[0] - 2 && ((ln.bbox[0] + ln.bbox[2]) / 2) <= t.bbox[2] + 2 &&
+        ((ln.bbox[1] + ln.bbox[3]) / 2) >= t.bbox[1] - 2 && ((ln.bbox[1] + ln.bbox[3]) / 2) <= t.bbox[3] + 2);
+      const loose = attachMarkers(lines.filter((ln) => !inTable(ln)));
+      const clusters = clusterLines(loose);
+      pages.push({
+        tables: tables.map((t) => ({
+          bbox: t.bbox.map((x) => Math.round(x * 10) / 10),
+          rows: t.row_count, cols: t.col_count,
+        })),
+        clusters: clusters.map((cl) => ({
+          bbox: [Math.min(...cl.map(l=>l.x0)), Math.min(...cl.map(l=>l.y0)),
+                 Math.max(...cl.map(l=>l.x1)), Math.max(...cl.map(l=>l.y1))].map((x) => Math.round(x * 10) / 10),
+          nLines: cl.length,
+          text: cl.map((l) => l.spans.map((s) => s.text).join("")).join(" ").slice(0, 40),
+        })),
+      });
+    }
+    return pages;
+  };
+  window.harnessReady = true;
+</script>
+</body>
+</html>
