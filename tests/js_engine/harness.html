@@ -18,9 +18,9 @@
 
   pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdfjs/pdf.worker.min.mjs";
 
-  window.convertToPptx = async (bytes) => {
+  const convert = async (bytes) => {
     const buf = new Uint8Array(bytes).buffer;
-    const { blob } = await convertPdfToPptx(buf, {
+    const { blob, report } = await convertPdfToPptx(buf, {
       pdfjs, PptxGenJS: window.PptxGenJS, PDFLib: window.PDFLib, JSZip: window.JSZip,
     });
     const out = new Uint8Array(await blob.arrayBuffer());
@@ -29,8 +29,12 @@
     for (let i = 0; i < out.length; i += CHUNK) {
       s += String.fromCharCode.apply(null, out.subarray(i, i + CHUNK));
     }
-    return btoa(s);
+    return { pptx: btoa(s), report };
   };
+  window.convertToPptx = async (bytes) => (await convert(bytes)).pptx;
+  // the engine's own per-page report (mode, confidence breakdown, notes),
+  // for suite checks that assert on WHY a page shipped the way it did
+  window.convertToPptxWithReport = convert;
   window.harnessReady = true;
 </script>
 </body>
