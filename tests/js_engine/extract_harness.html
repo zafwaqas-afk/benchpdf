@@ -10,7 +10,7 @@
     from "/assets/js/engine/extract.js";
   import { embeddedFontMetrics } from "/assets/js/engine/fontmetrics.js";
   import { attachMarkers, clusterLines } from "/assets/js/engine/cluster.js";
-  import { detectTables } from "/assets/js/engine/tables.js";
+  import { detectTables, inferAlignedTables } from "/assets/js/engine/tables.js";
 
   pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdfjs/pdf.worker.min.mjs";
   initOps(pdfjs);
@@ -43,10 +43,15 @@
   };
 
   window.dumpBackground = async (url, pageNo, dpi) => {
-    const doc = await pdfjs.getDocument({ url: location.origin + url }).promise;
+    const bytes = await (await fetch(location.origin + url)).arrayBuffer();
+    const metrics = await embeddedFontMetrics(bytes, window.PDFLib);
+    const doc = await pdfjs.getDocument({ data: bytes.slice(0) }).promise;
     const page = await doc.getPage(pageNo);
     const opList = await page.getOperatorList();
-    const bg = await renderBackground(page, opList, dpi);
+    // pass the extracted lines exactly as the engine does, so text painted as
+    // glyph-outline paths is stripped from the background too
+    const lines = await extractLines(page, opList, metrics);
+    const bg = await renderBackground(page, opList, dpi, [], lines);
     const full = await renderFull(page, dpi);
     return { bg: bg.toDataURL("image/png"), full: full.toDataURL("image/png") };
   };
@@ -60,7 +65,12 @@
       const opList = await page.getOperatorList();
       const lines = await extractLines(page, opList, metrics);
       const vec = extractVectors(page, opList);
-      const tables = detectTables(vec.segments);
+      // mirror the engine pipeline: text-less grids demoted, unruled tables
+      // recovered by column-alignment inference
+      let tables = detectTables(vec.segments).filter((t) => lines.some((ln) =>
+        ((ln.bbox[0] + ln.bbox[2]) / 2) >= t.bbox[0] - 2 && ((ln.bbox[0] + ln.bbox[2]) / 2) <= t.bbox[2] + 2 &&
+        ((ln.bbox[1] + ln.bbox[3]) / 2) >= t.bbox[1] - 2 && ((ln.bbox[1] + ln.bbox[3]) / 2) <= t.bbox[3] + 2));
+      tables = tables.concat(inferAlignedTables(lines, tables.map((t) => t.bbox)));
       const inTable = (ln) => tables.some((t) =>
         ((ln.bbox[0] + ln.bbox[2]) / 2) >= t.bbox[0] - 2 && ((ln.bbox[0] + ln.bbox[2]) / 2) <= t.bbox[2] + 2 &&
         ((ln.bbox[1] + ln.bbox[3]) / 2) >= t.bbox[1] - 2 && ((ln.bbox[1] + ln.bbox[3]) / 2) <= t.bbox[3] + 2);

@@ -21,7 +21,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", ".."))
 
 import fitz
-from app.extraction import _collect_lines, _attach_markers, _cluster_lines, _center, _point_in
+from app.extraction import (_collect_lines, _attach_markers, _cluster_lines,
+                            _center, _point_in, _infer_aligned_tables)
 
 SITE = os.environ.get("BENCHPDF_SITE_DIR") or os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(HERE))), "benchpdf-site")
@@ -47,15 +48,20 @@ def python_placement(pdf_path):
     pages = []
     for i in range(doc.page_count):
         page = doc[i]
+        lines = _collect_lines(page.get_text("dict"))
         try:
             found = page.find_tables(strategy="lines")
             tables = [t for t in found.tables if t.row_count >= 1 and t.col_count >= 1]
         except Exception:
             tables = []
+        # mirror the engine pipeline: text-less grids are demoted to graphics,
+        # unruled tables are recovered by column-alignment inference
+        tables = [t for t in tables
+                  if any(_point_in(t.bbox, *_center(ln["bbox"])) for ln in lines)]
+        tables = tables + _infer_aligned_tables(lines, [t.bbox for t in tables])
         tinfo = [{"bbox": [round(v, 1) for v in t.bbox],
                   "rows": t.row_count, "cols": t.col_count} for t in tables]
         tb = [t.bbox for t in tables]
-        lines = _collect_lines(page.get_text("dict"))
         loose = [ln for ln in lines if not any(_point_in(b, *_center(ln["bbox"])) for b in tb)]
         loose = _attach_markers(loose)
         clusters = _cluster_lines(loose)
