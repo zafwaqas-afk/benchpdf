@@ -288,3 +288,218 @@ def _split_paragraphs(cluster) -> list:
             cur.append(cluster[i])
     paras.append(cur)
     return paras
+
+
+# --------------------------------------------------------------------------- #
+# Glyph-outline paths: text drawn as filled vector curves (statement class)
+# --------------------------------------------------------------------------- #
+# Statement generators paint visible words as filled glyph-outline paths with
+# an invisible text layer on top for selectability. Consequences if outlines
+# are treated as ordinary art: the hybrid background keeps the painted word
+# while the invisible text re-emits editable (ghost doubling), and run colour
+# comes from the invisible layer (usually black) instead of the ink.
+# A fill is a glyph-outline blob iff it contains curves (glyphs always do;
+# rules/underlines/cell fills never do), it is not huge, and its bbox is
+# mostly covered by the union of extracted text-line bboxes.
+
+def _glyph_pad(line) -> float:
+    return max(2.0, 0.3 * (line.get("size") or (line["y1"] - line["y0"]) or 10))
+
+
+def _is_glyph_outline(rect, has_curve, lines, page_area) -> bool:
+    if not has_curve:
+        return False
+    fw, fh = rect[2] - rect[0], rect[3] - rect[1]
+    fa = fw * fh
+    if fa <= 0 or (page_area and fa > 0.25 * page_area):
+        return False
+    covered = 0.0
+    for ln in lines:
+        pad = _glyph_pad(ln)
+        ix = min(rect[2], ln["x1"] + pad) - max(rect[0], ln["x0"] - pad)
+        iy = min(rect[3], ln["y1"] + pad) - max(rect[1], ln["y0"] - pad)
+        if ix > 0 and iy > 0:
+            covered += ix * iy
+        if covered >= 0.70 * fa:
+            return True
+    return False
+
+
+def _glyph_outline_drawings(drawings, lines, page_area) -> list:
+    """The subset of page.get_drawings() that is glyph-outline ink over
+    extracted text lines: [(rect, fill_rgb01 or None)]."""
+    out = []
+    for d in drawings:
+        if d.get("fill") is None:
+            continue
+        r = d.get("rect")
+        if r is None:
+            continue
+        has_curve = any(it and it[0] == "c" for it in d.get("items", []))
+        rect = (r.x0, r.y0, r.x1, r.y1)
+        if _is_glyph_outline(rect, has_curve, lines, page_area):
+            out.append((rect, d.get("fill")))
+    return out
+
+
+def _inherit_glyph_colors(lines, drawings, page_w, page_h) -> None:
+    """Spans re-emitted from an invisible text layer inherit the colour of the
+    glyph-outline fills actually painted over them. Mutates spans in place."""
+    page_area = (page_w or 0) * (page_h or 0)
+    glyphs = _glyph_outline_drawings(drawings, lines, page_area)
+    if not glyphs:
+        return
+    for ln in lines:
+        pad = _glyph_pad(ln)
+        over = [(rect, fill) for rect, fill in glyphs
+                if min(rect[2], ln["x1"] + pad) > max(rect[0], ln["x0"] - pad)
+                and min(rect[3], ln["y1"] + pad) > max(rect[1], ln["y0"] - pad)]
+        if not over:
+            continue
+        total_chars = max(1, sum(len(s["text"]) for s in ln["spans"]))
+        x = ln["x0"]
+        for sp in ln["spans"]:
+            w = max(1.0, ln["x1"] - ln["x0"]) * (len(sp["text"]) / total_chars)
+            sx0, sx1 = x, x + w
+            x = sx1
+            best, best_cover = None, 0.0
+            for rect, fill in over:
+                ov = min(rect[2], sx1) - max(rect[0], sx0)
+                if ov > best_cover:
+                    best_cover, best = ov, fill
+            if best is not None and best_cover >= 0.35 * (sx1 - sx0):
+                r, g, b = (int(round(v * 255)) for v in best[:3])
+                sp["color"] = (r << 16) | (g << 8) | b
+
+
+# --------------------------------------------------------------------------- #
+# Column-alignment inference for UNRULED tables
+# --------------------------------------------------------------------------- #
+# Statement ledgers frequently ship with no ruling lines, so the lines-strategy
+# detector never sees them. The remaining signal is alignment: consecutive
+# baseline rows whose spans cluster at shared x-rails (left OR right edge, so
+# right-aligned money columns count), usually with a header row on top.
+# Deliberately conservative so prose can never tabulate: a run only starts at
+# a row with >= _MIN_COLS spans, needs >= _MIN_DATA_ROWS + header rows and
+# >= _MIN_COLS supported columns, any stray span breaks the run, and column
+# x-extents may not overlap. Mirrors assets/js/engine/tables.js.
+
+_COL_TOL = 3.5
+_MIN_DATA_ROWS = 3
+_MIN_COLS = 3
+_ROW_PITCH_FACTOR = 2.6
+
+
+class InferredTableRow:
+    def __init__(self, cells):
+        self.cells = cells
+
+
+class InferredTable:
+    """fitz.table.Table-shaped result of column inference (unruled source)."""
+
+    def __init__(self, bbox, rows):
+        self.bbox = bbox
+        self.rows = rows
+        self.row_count = len(rows)
+        self.col_count = len(rows[0].cells) if rows else 0
+        self.inferred = True
+
+
+def _group_rows(lines):
+    rows = []
+    for ln in sorted(lines, key=lambda l: (l["y0"], l["x0"])):
+        cy = (ln["y0"] + ln["y1"]) / 2
+        r = rows[-1] if rows else None
+        if r is not None and abs(cy - r["cy"]) <= 0.5 * max(ln["size"] or 8, r["size"] or 8):
+            r["segs"].append(ln)
+            r["cy"] = (r["cy"] * (len(r["segs"]) - 1) + cy) / len(r["segs"])
+            r["size"] = max(r["size"], ln["size"] or 0)
+        else:
+            rows.append({"cy": cy, "size": ln["size"] or 8, "segs": [ln]})
+    for r in rows:
+        r["segs"].sort(key=lambda s: s["x0"])
+        r["y0"] = min(s["y0"] for s in r["segs"])
+        r["y1"] = max(s["y1"] for s in r["segs"])
+    return rows
+
+
+def _infer_aligned_tables(lines, existing_bboxes=()) -> list:
+    loose = [ln for ln in lines
+             if any(s["text"].strip() for s in ln["spans"])
+             and not any(_point_in(b, *_center(ln["bbox"])) for b in existing_bboxes)]
+    rows = _group_rows(loose)
+    tables = []
+    i = 0
+    while i < len(rows):
+        start = rows[i]
+        if len(start["segs"]) < _MIN_COLS:
+            i += 1
+            continue
+        clusters = [{"x0m": s["x0"], "x1m": s["x1"], "minX0": s["x0"], "maxX1": s["x1"], "n": 1}
+                    for s in start["segs"]]
+        run = [start]
+        j = i + 1
+        while j < len(rows):
+            row, prev = rows[j], run[-1]
+            if row["cy"] - prev["cy"] > _ROW_PITCH_FACTOR * max(prev["size"], row["size"], 8):
+                break
+            if len(row["segs"]) < 2:
+                break
+            matched, plan, ok = 0, [], True
+            for seg in row["segs"]:
+                c = next((c for c in clusters
+                          if abs(seg["x0"] - c["x0m"]) <= _COL_TOL
+                          or abs(seg["x1"] - c["x1m"]) <= _COL_TOL), None)
+                if c is not None:
+                    matched += 1
+                    plan.append((c, seg))
+                elif not any(min(seg["x1"], c["maxX1"]) - max(seg["x0"], c["minX0"]) > 1
+                             for c in clusters):
+                    plan.append((None, seg))
+                else:
+                    ok = False
+                    break
+            if not ok or matched < 2:
+                break
+            for c, seg in plan:
+                if c is not None:
+                    c["x0m"] = (c["x0m"] * c["n"] + seg["x0"]) / (c["n"] + 1)
+                    c["x1m"] = (c["x1m"] * c["n"] + seg["x1"]) / (c["n"] + 1)
+                    c["minX0"] = min(c["minX0"], seg["x0"])
+                    c["maxX1"] = max(c["maxX1"], seg["x1"])
+                    c["n"] += 1
+                else:
+                    clusters.append({"x0m": seg["x0"], "x1m": seg["x1"],
+                                     "minX0": seg["x0"], "maxX1": seg["x1"], "n": 1})
+            run.append(row)
+            j += 1
+        # a column needs support in >=25% of rows (min 3): money-in columns
+        # are legitimately sparse, but a one-off stray is not a column
+        supported = [c for c in clusters if c["n"] >= max(3, -(-len(run) // 4))]
+        dense = sum(1 for r in run if len(r["segs"]) >= _MIN_COLS)
+        if len(run) >= _MIN_DATA_ROWS + 1 and len(supported) >= _MIN_COLS and dense >= _MIN_DATA_ROWS:
+            tables.append(_build_inferred_table(run, supported))
+            i = j
+        else:
+            i += 1
+    return tables
+
+
+def _build_inferred_table(run, cols) -> InferredTable:
+    cols = sorted(cols, key=lambda c: c["minX0"])
+    col_bounds = [cols[0]["minX0"] - 2]
+    for k in range(len(cols) - 1):
+        col_bounds.append((cols[k]["maxX1"] + cols[k + 1]["minX0"]) / 2)
+    col_bounds.append(cols[-1]["maxX1"] + 2)
+    row_bounds = [run[0]["y0"] - 2]
+    for k in range(len(run) - 1):
+        row_bounds.append((run[k]["y1"] + run[k + 1]["y0"]) / 2)
+    row_bounds.append(run[-1]["y1"] + 2)
+    rows = []
+    for ri in range(len(run)):
+        cells = [(col_bounds[ci], row_bounds[ri], col_bounds[ci + 1], row_bounds[ri + 1])
+                 for ci in range(len(cols))]
+        rows.append(InferredTableRow(cells))
+    bbox = (col_bounds[0], row_bounds[0], col_bounds[-1], row_bounds[-1])
+    return InferredTable(bbox, rows)

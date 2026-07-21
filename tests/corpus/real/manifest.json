@@ -1,0 +1,467 @@
+{
+ "trim_pages": 3,
+ "documents": [
+  {
+   "name": "arxiv_1706_03762",
+   "url": "https://arxiv.org/pdf/1706.03762",
+   "generator_class": "latex",
+   "source_pages": 15,
+   "producer": "pdfTeX-1.40.25",
+   "creator": "LaTeX with hyperref",
+   "status": "ok"
+  },
+  {
+   "name": "arxiv_1810_04805",
+   "url": "https://arxiv.org/pdf/1810.04805",
+   "generator_class": "latex",
+   "source_pages": 16,
+   "producer": "pdfTeX-1.40.17",
+   "creator": "LaTeX with hyperref package",
+   "status": "ok"
+  },
+  {
+   "name": "arxiv_2005_14165",
+   "url": "https://arxiv.org/pdf/2005.14165",
+   "generator_class": "latex",
+   "source_pages": 75,
+   "producer": "pdfTeX-1.40.17",
+   "creator": "LaTeX with hyperref package",
+   "status": "ok"
+  },
+  {
+   "name": "arxiv_1512_03385",
+   "url": "https://arxiv.org/pdf/1512.03385",
+   "generator_class": "latex",
+   "source_pages": 12,
+   "producer": "pdfTeX-1.40.12",
+   "creator": "LaTeX with hyperref package",
+   "status": "ok"
+  },
+  {
+   "name": "arxiv_1409_0473",
+   "url": "https://arxiv.org/pdf/1409.0473",
+   "generator_class": "latex",
+   "source_pages": 15,
+   "producer": "pdfTeX-1.40.12",
+   "creator": "LaTeX with hyperref package",
+   "status": "ok"
+  },
+  {
+   "name": "arxiv_2010_11929",
+   "url": "https://arxiv.org/pdf/2010.11929",
+   "generator_class": "latex",
+   "source_pages": 22,
+   "producer": "pdfTeX-1.40.21",
+   "creator": "LaTeX with hyperref",
+   "status": "ok"
+  },
+  {
+   "name": "arxiv_1412_6980",
+   "url": "https://arxiv.org/pdf/1412.6980",
+   "generator_class": "latex",
+   "source_pages": 15,
+   "producer": "pdfTeX-1.40.12",
+   "creator": "LaTeX with hyperref package",
+   "status": "ok"
+  },
+  {
+   "name": "arxiv_1502_03167",
+   "url": "https://arxiv.org/pdf/1502.03167",
+   "generator_class": "latex",
+   "source_pages": 11,
+   "producer": "dvips + GPL Ghostscript GIT PRERELEASE 9.08",
+   "creator": "LaTeX with hyperref package",
+   "status": "ok"
+  },
+  {
+   "name": "arxiv_1606_06565",
+   "url": "https://arxiv.org/pdf/1606.06565",
+   "generator_class": "latex",
+   "source_pages": 29,
+   "producer": "pdfTeX-1.40.12",
+   "creator": "LaTeX with hyperref package",
+   "status": "ok"
+  },
+  {
+   "name": "arxiv_1707_06347",
+   "url": "https://arxiv.org/pdf/1707.06347",
+   "generator_class": "latex",
+   "source_pages": 12,
+   "producer": "pdfTeX-1.40.17",
+   "creator": "LaTeX with hyperref package",
+   "status": "ok"
+  },
+  {
+   "name": "arxiv_2203_02155",
+   "url": "https://arxiv.org/pdf/2203.02155",
+   "generator_class": "latex",
+   "source_pages": 68,
+   "producer": "pdfTeX-1.40.21",
+   "creator": "LaTeX with hyperref",
+   "status": "ok"
+  },
+  {
+   "name": "arxiv_2302_13971",
+   "url": "https://arxiv.org/pdf/2302.13971",
+   "generator_class": "latex",
+   "source_pages": 27,
+   "producer": "pdfTeX-1.40.21",
+   "creator": "LaTeX with hyperref",
+   "status": "ok"
+  },
+  {
+   "name": "arxiv_1301_3781",
+   "url": "https://arxiv.org/pdf/1301.3781",
+   "generator_class": "latex",
+   "source_pages": 12,
+   "producer": "pdfTeX-1.40.12",
+   "creator": "LaTeX with hyperref package",
+   "status": "ok"
+  },
+  {
+   "name": "arxiv_1611_05431",
+   "url": "https://arxiv.org/pdf/1611.05431",
+   "generator_class": "latex",
+   "source_pages": 10,
+   "producer": "pdfTeX-1.40.17",
+   "creator": "LaTeX with hyperref package",
+   "status": "ok"
+  },
+  {
+   "name": "irs_f1040",
+   "url": "https://www.irs.gov/pub/irs-pdf/f1040.pdf",
+   "generator_class": "gov-form",
+   "source_pages": 2,
+   "producer": "Designer 6.5",
+   "creator": "Designer 6.5",
+   "status": "ok"
+  },
+  {
+   "name": "irs_fw9",
+   "url": "https://www.irs.gov/pub/irs-pdf/fw9.pdf",
+   "generator_class": "gov-form",
+   "source_pages": 6,
+   "producer": "Designer 6.5",
+   "creator": "Designer 6.5",
+   "status": "ok"
+  },
+  {
+   "name": "irs_fw4",
+   "url": "https://www.irs.gov/pub/irs-pdf/fw4.pdf",
+   "generator_class": "gov-form",
+   "source_pages": 5,
+   "producer": "Designer 6.5",
+   "creator": "Designer 6.5",
+   "status": "ok"
+  },
+  {
+   "name": "irs_f4506t",
+   "url": "https://www.irs.gov/pub/irs-pdf/f4506t.pdf",
+   "generator_class": "gov-form",
+   "source_pages": 2,
+   "producer": "Designer 6.5",
+   "creator": "Designer 6.5",
+   "status": "ok"
+  },
+  {
+   "name": "irs_f941",
+   "url": "https://www.irs.gov/pub/irs-pdf/f941.pdf",
+   "generator_class": "gov-form",
+   "source_pages": 3,
+   "producer": "Designer 6.5",
+   "creator": "Designer 6.5",
+   "status": "ok"
+  },
+  {
+   "name": "irs_f8949",
+   "url": "https://www.irs.gov/pub/irs-pdf/f8949.pdf",
+   "generator_class": "gov-form",
+   "source_pages": 2,
+   "producer": "Designer 6.5",
+   "creator": "Designer 6.5",
+   "status": "ok"
+  },
+  {
+   "name": "irs_fss4",
+   "url": "https://www.irs.gov/pub/irs-pdf/fss4.pdf",
+   "generator_class": "gov-form",
+   "source_pages": 2,
+   "producer": "Designer 6.5",
+   "creator": "Designer 6.5",
+   "status": "ok"
+  },
+  {
+   "name": "irs_f1065",
+   "url": "https://www.irs.gov/pub/irs-pdf/f1065.pdf",
+   "generator_class": "gov-form",
+   "source_pages": 6,
+   "producer": "Designer 6.5",
+   "creator": "Designer 6.5",
+   "status": "ok"
+  },
+  {
+   "name": "irs_f1120",
+   "url": "https://www.irs.gov/pub/irs-pdf/f1120.pdf",
+   "generator_class": "gov-form",
+   "source_pages": 6,
+   "producer": "Designer 6.5",
+   "creator": "Designer 6.5",
+   "status": "ok"
+  },
+  {
+   "name": "irs_p15",
+   "url": "https://www.irs.gov/pub/irs-pdf/p15.pdf",
+   "generator_class": "gov-publication",
+   "source_pages": 59,
+   "producer": "Antenna House PDF Output Library 6.6.1437 (Linux64); modified using iText 2.1.7 by 1T3XT",
+   "creator": "AH XSL Formatter V6.6 MR4 for Linux64 : 6.6.6.37929 (2019/03/11 12:35JST)",
+   "status": "ok"
+  },
+  {
+   "name": "rfc_793",
+   "url": "https://www.rfc-editor.org/rfc/pdfrfc/rfc793.txt.pdf",
+   "generator_class": "troff",
+   "status": "skipped: HTTPError: HTTP Error 404: Not Found"
+  },
+  {
+   "name": "rfc_2616",
+   "url": "https://www.rfc-editor.org/rfc/pdfrfc/rfc2616.txt.pdf",
+   "generator_class": "troff",
+   "status": "skipped: HTTPError: HTTP Error 404: Not Found"
+  },
+  {
+   "name": "rfc_5321",
+   "url": "https://www.rfc-editor.org/rfc/pdfrfc/rfc5321.txt.pdf",
+   "generator_class": "troff",
+   "status": "skipped: HTTPError: HTTP Error 404: Not Found"
+  },
+  {
+   "name": "rfc_7231",
+   "url": "https://www.rfc-editor.org/rfc/pdfrfc/rfc7231.txt.pdf",
+   "generator_class": "troff",
+   "status": "skipped: HTTPError: HTTP Error 404: Not Found"
+  },
+  {
+   "name": "rfc_8446",
+   "url": "https://www.rfc-editor.org/rfc/pdfrfc/rfc8446.txt.pdf",
+   "generator_class": "troff",
+   "status": "skipped: HTTPError: HTTP Error 404: Not Found"
+  },
+  {
+   "name": "govuk_r43_notes",
+   "url": "https://assets.publishing.service.gov.uk/media/69bc066f8006048065f73d03/R43_Notes.pdf",
+   "generator_class": "govuk",
+   "source_pages": 16,
+   "producer": "Adobe PDF Library 9.0",
+   "creator": "Adobe InDesign CS4 (6.0.6)",
+   "status": "ok"
+  },
+  {
+   "name": "govuk_frem_2024_25",
+   "url": "https://assets.publishing.service.gov.uk/media/67ed5550632d0f88e8248c16/MASTER_FINAL_DRAFT_2024-25_FReM_APRIL_2025_RELEASE.pdf",
+   "generator_class": "govuk",
+   "source_pages": 138,
+   "producer": "",
+   "creator": "",
+   "status": "ok"
+  },
+  {
+   "name": "govuk_spend_guidance",
+   "url": "https://assets.publishing.service.gov.uk/media/5a821d93ed915d74e6235dd7/guidance_for_publishing_spend.pdf",
+   "generator_class": "govuk",
+   "source_pages": 18,
+   "producer": "",
+   "creator": "",
+   "status": "ok"
+  },
+  {
+   "name": "ecb_eb202404",
+   "url": "https://www.ecb.europa.eu/pub/pdf/ecbu/eb202404.en.pdf",
+   "generator_class": "ecb-report",
+   "source_pages": 144,
+   "producer": "ABBYY FineReader 15",
+   "creator": "ABBYY FineReader 15",
+   "status": "ok"
+  },
+  {
+   "name": "ecb_eb202501",
+   "url": "https://www.ecb.europa.eu/pub/pdf/ecbu/eb202501.en.pdf",
+   "generator_class": "ecb-report",
+   "source_pages": 157,
+   "producer": "Microsoft\u00ae Word for Microsoft 365",
+   "creator": "Microsoft\u00ae Word for Microsoft 365",
+   "status": "ok"
+  },
+  {
+   "name": "ecb_eb202503",
+   "url": "https://www.ecb.europa.eu/pub/pdf/ecbu/eb202503.en.pdf",
+   "generator_class": "ecb-report",
+   "source_pages": 121,
+   "producer": "Microsoft\u00ae Word for Microsoft 365",
+   "creator": "Microsoft\u00ae Word for Microsoft 365",
+   "status": "ok"
+  },
+  {
+   "name": "ecb_eb202508",
+   "url": "https://www.ecb.europa.eu/pub/pdf/ecbu/eb202508.en.pdf",
+   "generator_class": "ecb-report",
+   "source_pages": 155,
+   "producer": "Microsoft\u00ae Word for Microsoft 365",
+   "creator": "Microsoft\u00ae Word for Microsoft 365",
+   "status": "ok"
+  },
+  {
+   "name": "boe_mpr_2024_11",
+   "url": "https://www.bankofengland.co.uk/-/media/boe/files/monetary-policy-report/2024/november/monetary-policy-report-november-2024.pdf",
+   "generator_class": "boe-report",
+   "source_pages": 90,
+   "producer": "Skia/PDF m129",
+   "creator": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0",
+   "status": "ok"
+  },
+  {
+   "name": "boe_mpr_2025_08",
+   "url": "https://www.bankofengland.co.uk/-/media/boe/files/monetary-policy-report/2025/august/monetary-policy-report-august-2025.pdf",
+   "generator_class": "boe-report",
+   "source_pages": 107,
+   "producer": "Skia/PDF m138",
+   "creator": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0",
+   "status": "ok"
+  },
+  {
+   "name": "boe_mpr_2026_02",
+   "url": "https://www.bankofengland.co.uk/-/media/boe/files/monetary-policy-report/2026/february/monetary-policy-report-february-2026.pdf",
+   "generator_class": "boe-report",
+   "source_pages": 100,
+   "producer": "Adobe PDF Library 18.0",
+   "creator": "Adobe InDesign 21.0 (Windows)",
+   "status": "ok"
+  },
+  {
+   "name": "w3c_svg11_2011",
+   "url": "https://www.w3.org/TR/SVG11/REC-SVG11-20110816.pdf",
+   "generator_class": "w3c-spec",
+   "source_pages": 826,
+   "producer": "Prince 7.1 (www.princexml.com)",
+   "creator": "",
+   "status": "ok"
+  },
+  {
+   "name": "w3c_svg10_2001",
+   "url": "https://www.w3.org/TR/2001/REC-SVG-20010904/REC-SVG-20010904.pdf",
+   "generator_class": "w3c-spec",
+   "source_pages": 617,
+   "producer": "Acrobat Web Capture 5.0",
+   "creator": "",
+   "status": "ok"
+  },
+  {
+   "name": "w3c_wcag20_wd",
+   "url": "https://www.w3.org/WAI/GL/WCAG20/WD-WCAG20-20010824.pdf",
+   "generator_class": "w3c-spec",
+   "source_pages": 33,
+   "producer": "Acrobat Web Capture 5.0",
+   "creator": "",
+   "status": "ok"
+  },
+  {
+   "name": "w3c_svg_tutorial",
+   "url": "https://www.w3.org/2002/Talks/www2002-svgtut-ih/hwtut.pdf",
+   "generator_class": "w3c-slides",
+   "source_pages": 76,
+   "producer": "Acrobat PDFWriter 4.05 for Windows NT",
+   "creator": "SVG Primer - Microsoft Internet Explorer provided by BTinternet - [Working Offline]",
+   "status": "ok"
+  },
+  {
+   "name": "sec_pnrg_ars_2026",
+   "url": "https://www.sec.gov/Archives/edgar/data/56868/000143774926013009/pnrg20260422_ars.pdf",
+   "generator_class": "sec-filing",
+   "source_pages": 84,
+   "producer": "Acrobat Distiller 26.0 (Windows)",
+   "creator": "PScript5.dll Version 5.2.2",
+   "status": "ok"
+  },
+  {
+   "name": "sec_addus_ar_2023",
+   "url": "https://www.sec.gov/Archives/edgar/data/1468328/000095017024053594/2023_annual_report.pdf",
+   "generator_class": "sec-filing",
+   "source_pages": 108,
+   "producer": "HiQPdf 9.21",
+   "creator": "",
+   "status": "ok"
+  },
+  {
+   "name": "sec_tm262321_ars",
+   "url": "https://www.sec.gov/Archives/edgar/data/908255/000110465926031786/tm262321d2_ars.pdf",
+   "generator_class": "sec-filing",
+   "source_pages": 148,
+   "producer": "Adobe PDF Library 18.0",
+   "creator": "Adobe InDesign 21.0 (Macintosh)",
+   "status": "ok"
+  },
+  {
+   "name": "nist_sp800_53r5",
+   "url": "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-53r5.pdf",
+   "generator_class": "nist",
+   "source_pages": 492,
+   "producer": "Adobe PDF Library 20.13.96",
+   "creator": "Acrobat PDFMaker 20 for Word",
+   "status": "ok"
+  },
+  {
+   "name": "nist_sp800_63b",
+   "url": "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-63b.pdf",
+   "generator_class": "nist",
+   "source_pages": 80,
+   "producer": "Adobe PDF Library 15.0",
+   "creator": "Acrobat PDFMaker 17 for Word",
+   "status": "ok"
+  },
+  {
+   "name": "nist_fips_203",
+   "url": "https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf",
+   "generator_class": "nist",
+   "source_pages": 56,
+   "producer": "LuaHBTeX, Version 1.18.0 (TeX Live 2024)",
+   "creator": "LaTeX with hyperref",
+   "status": "ok"
+  },
+  {
+   "name": "fed_fomc_2024_06",
+   "url": "https://www.federalreserve.gov/monetarypolicy/files/fomcminutes20240612.pdf",
+   "generator_class": "fed",
+   "source_pages": 10,
+   "producer": "Acrobat Distiller 23.0 (Windows)",
+   "creator": "PScript5.dll Version 5.2.2",
+   "status": "ok"
+  },
+  {
+   "name": "fed_fomc_2025_01",
+   "url": "https://www.federalreserve.gov/monetarypolicy/files/fomcminutes20250129.pdf",
+   "generator_class": "fed",
+   "source_pages": 21,
+   "producer": "Acrobat Distiller 24.0 (Windows)",
+   "creator": "PScript5.dll Version 5.2.2",
+   "status": "ok"
+  },
+  {
+   "name": "eurlex_gdpr",
+   "url": "https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX:32016R0679",
+   "generator_class": "eurlex",
+   "status": "skipped: ValueError: not a PDF (0 bytes)"
+  },
+  {
+   "name": "eurlex_dsa",
+   "url": "https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX:32022R2065",
+   "generator_class": "eurlex",
+   "status": "skipped: ValueError: not a PDF (0 bytes)"
+  },
+  {
+   "name": "eurlex_dsm",
+   "url": "https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX:32019L0790",
+   "generator_class": "eurlex",
+   "status": "skipped: ValueError: not a PDF (0 bytes)"
+  }
+ ]
+}

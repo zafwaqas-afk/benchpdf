@@ -31,6 +31,7 @@ Usage:
 """
 
 import glob
+import io
 import json
 import os
 import re
@@ -46,6 +47,8 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from app.converter import convert_pdf_to_pptx
 from app.edit_model import EditSession
+from app.extraction import (_collect_lines, _infer_aligned_tables,
+                            _inherit_glyph_colors, _point_in, _center)
 from app.pdf_edit_export import export_edited_pdf
 from app.convert_pdf_misc import pdf_to_images, pdf_to_text
 from tests.engines import ENGINES, EngineUnavailable
@@ -177,20 +180,263 @@ def _native_tables(prs):
     return sum(1 for sl in prs.slides for sh in sl.shapes if sh.has_table)
 
 
-def check_tables(prs, src_pdf, res, name):
-    """Every table the PDF detects must arrive as a NATIVE PowerPoint table.
-
-    Derived from the .pptx and the source PDF, not from any engine's own report,
-    so the same assertion holds for an engine that reports nothing.
-    """
+def _source_tables(src_pdf):
+    """Expected tables per page, engine-independently: ruled tables that
+    CONTAIN text (a text-less decorative grid is graphics, not a table),
+    plus unruled tables recovered by column-alignment inference."""
     doc = fitz.open(src_pdf)
-    want = sum(len([t for t in doc[i].find_tables(strategy="lines").tables
-                    if t.row_count >= 1 and t.col_count >= 1])
-               for i in range(doc.page_count))
+    per_page = []
+    for i in range(doc.page_count):
+        lines = _collect_lines(doc[i].get_text("dict"))
+        try:
+            found = doc[i].find_tables(strategy="lines").tables
+        except Exception:
+            found = []
+        ruled = [t for t in found
+                 if t.row_count >= 1 and t.col_count >= 1
+                 and any(_point_in(t.bbox, *_center(ln["bbox"])) for ln in lines)]
+        inferred = _infer_aligned_tables(lines, [t.bbox for t in ruled])
+        per_page.append({"ruled": ruled, "inferred": inferred, "lines": lines})
     doc.close()
+    return per_page
+
+
+def check_tables(prs, src_pdf, res, name):
+    """Every table the PDF detects must arrive as a NATIVE PowerPoint table -
+    including UNRULED tables recovered from column alignment (the statement
+    ledger class). Derived from the .pptx and the source PDF, not from any
+    engine's own report, so the same assertion holds for an engine that
+    reports nothing.
+    """
+    pages = _source_tables(src_pdf)
+    want = sum(len(p["ruled"]) + len(p["inferred"]) for p in pages)
     got = _native_tables(prs)
     res.check(got >= want,
-              f"[{name}] every PDF table is native (source {want}, output {got})")
+              f"[{name}] every PDF table is native, ruled or not (source {want}, output {got})")
+
+    # each inferred (unruled) source table's text must live in a NATIVE table,
+    # not in loose text boxes
+    table_text = " ".join(
+        " ".join(c.text.split())
+        for sl in prs.slides for sh in sl.shapes if sh.has_table
+        for row in sh.table.rows for c in row.cells)
+    missing = []
+    for p in pages:
+        for t in p["inferred"]:
+            probe = next((" ".join("".join(s["text"] for s in ln["spans"]).split())
+                          for ln in p["lines"]
+                          if _point_in(t.bbox, *_center(ln["bbox"]))
+                          and len("".join(s["text"] for s in ln["spans"]).strip()) >= 6),
+                         None)
+            if probe and probe not in table_text:
+                missing.append(probe[:30])
+    if any(p["inferred"] for p in pages):
+        res.check(not missing,
+                  f"[{name}] unruled ledger text lands in native tables (missing: {missing[:3]})")
+
+
+def check_no_empty_tables(prs, res, name):
+    """A native table with no text in any cell is a phantom: a decorative
+    grid that should have stayed graphics (fault: 8-square brand mark
+    emitted as an empty 1x8 table)."""
+    empty = 0
+    for sl in prs.slides:
+        for sh in sl.shapes:
+            if sh.has_table:
+                if not any(c.text.strip() for row in sh.table.rows for c in row.cells):
+                    empty += 1
+    res.check(empty == 0, f"[{name}] no native table with all-empty cells (found: {empty})")
+
+
+def _editable_text(prs):
+    parts = []
+    for sl in prs.slides:
+        for sh in sl.shapes:
+            if sh.has_text_frame and sh.text_frame.text.strip():
+                parts.append(" ".join(sh.text_frame.text.split()))
+            elif sh.has_table:
+                for row in sh.table.rows:
+                    for c in row.cells:
+                        if c.text.strip():
+                            parts.append(" ".join(c.text.split()))
+    return " ".join(parts)
+
+
+def check_no_ghost_text(prs, src_pdf, res, name):
+    """No text may exist BOTH as pixels in a background raster and as editable
+    text on top: that is the ghost-doubling fault (form-XObject/outline-path
+    statements). OCR-free: for every source line whose text is present in the
+    editable layer, the full-page background image under its bbox must be
+    (near) ink-free. Fixture backgrounds are plain under text, so ink there is
+    the line's own ghost."""
+    from PIL import Image
+    editable = _editable_text(prs)
+    doc = fitz.open(src_pdf)
+    sw_pt = prs.slide_width / 12700.0
+    offenders = 0
+    checked = 0
+    for i, slide in enumerate(prs.slides):
+        if i >= doc.page_count:
+            break
+        # the background is a picture covering (nearly) the whole slide
+        bg = None
+        for sh in slide.shapes:
+            if sh.shape_type == MSO_SHAPE_TYPE.PICTURE \
+                    and sh.width >= 0.9 * prs.slide_width \
+                    and sh.height >= 0.9 * prs.slide_height:
+                bg = sh
+        if bg is None:
+            continue
+        img = Image.open(io.BytesIO(bg.image.blob)).convert("RGB")
+        z = img.width / sw_pt
+        for ln in _collect_lines(doc[i].get_text("dict")):
+            txt = " ".join("".join(s["text"] for s in ln["spans"]).split())
+            if len(txt) < 6 or txt not in editable:
+                continue
+            x0, y0, x1, y1 = ln["bbox"]
+            px0, py0 = max(int(x0 * z), 0), max(int(y0 * z), 0)
+            px1 = min(int(x1 * z), img.width)
+            py1 = min(int(y1 * z), img.height)
+            if px1 - px0 < 2 or py1 - py0 < 2:
+                continue
+            crop = img.crop((px0, py0, px1, py1))
+            px = list(crop.getdata())
+            dark = sum(1 for p in px if p[0] < 128 and p[1] < 128 and p[2] < 128)
+            checked += 1
+            if dark / len(px) > 0.05:
+                offenders += 1
+    doc.close()
+    if checked:
+        res.check(offenders == 0,
+                  f"[{name}] no text doubled between background raster and editable layer "
+                  f"(ghosted lines: {offenders}/{checked})")
+    else:
+        res.skip(f"[{name}] no full-page background raster to check for ghosts")
+
+
+_MEASURE_FONTS = {}
+
+
+def _measure_word(word, size, bold, mono):
+    key = ("cour" if mono else ("hebo" if bold else "helv"))
+    if key not in _MEASURE_FONTS:
+        _MEASURE_FONTS[key] = fitz.Font(key)
+    return _MEASURE_FONTS[key].text_length(word, fontsize=size)
+
+
+def check_no_midword_wrap(prs, res, name):
+    """A wrapping text box must be wide enough for its longest word, or
+    PowerPoint breaks the word across lines (fault: narrow header blocks
+    like 'END OF DAY ACCOUNT BALANCE' wrapping mid-word). Word widths are
+    estimated with metric-compatible base-14 fonts."""
+    offenders = []
+    for slide in prs.slides:
+        for sh in slide.shapes:
+            if not (sh.has_text_frame and sh.text_frame.text.strip()):
+                continue
+            tf = sh.text_frame
+            if tf.word_wrap is False:      # wrap off: PPT never breaks words
+                continue
+            w_pt = sh.width / 12700.0
+            for para in tf.paragraphs:
+                for r in para.runs:
+                    size = r.font.size.pt if r.font.size else 10.0
+                    bold = bool(r.font.bold)
+                    fname = (r.font.name or "").lower()
+                    mono = any(k in fname for k in ("consol", "courier", "mono"))
+                    for word in r.text.split():
+                        if _measure_word(word, size, bold, mono) > w_pt + 0.75:
+                            offenders.append(word[:16])
+    res.check(not offenders,
+              f"[{name}] no box narrower than its longest word "
+              f"(mid-word wrap risks: {offenders[:4]})")
+
+
+def _source_line_colors(src_pdf):
+    """normalised line text -> rendered ink colour, glyph-outline aware."""
+    doc = fitz.open(src_pdf)
+    out = {}
+    ambiguous = set()
+    for i in range(doc.page_count):
+        page = doc[i]
+        lines = _collect_lines(page.get_text("dict"))
+        try:
+            drawings = page.get_drawings()
+        except Exception:
+            drawings = []
+        _inherit_glyph_colors(lines, drawings, page.rect.width, page.rect.height)
+        for ln in lines:
+            txt = " ".join("".join(s["text"] for s in ln["spans"]).split())
+            if len(txt) < 6:
+                continue
+            spans = [s for s in ln["spans"] if s["text"].strip()]
+            cols = {int(s.get("color", 0)) & 0xFFFFFF for s in spans}
+            if len(cols) != 1:
+                continue          # mixed-colour lines can't be asserted at line level
+            col = cols.pop()
+            if txt in out and out[txt] != col:
+                ambiguous.add(txt)
+            out[txt] = col
+    doc.close()
+    return {t: c for t, c in out.items() if t not in ambiguous}
+
+
+def _run_colors(prs):
+    """[(normalised paragraph text, run colour int)] for text boxes and cells."""
+    out = []
+
+    def eat(tf):
+        for para in tf.paragraphs:
+            ptxt = " ".join("".join(r.text for r in para.runs).split())
+            for r in para.runs:
+                try:
+                    col = r.font.color.rgb          # RGBColor is a str subclass
+                    col = int(str(col), 16)
+                except Exception:
+                    col = 0
+                out.append((ptxt, col))
+
+    for sl in prs.slides:
+        for sh in sl.shapes:
+            if sh.has_text_frame and sh.text_frame.text.strip():
+                eat(sh.text_frame)
+            elif sh.has_table:
+                for row in sh.table.rows:
+                    for c in row.cells:
+                        if c.text.strip():
+                            eat(c.text_frame)
+    return out
+
+
+def check_colors(prs, src_pdf, res, name):
+    """Output run colours must match the SOURCE'S RENDERED ink colour within
+    tolerance: greys and brand colours survive, nothing flattens to #000000.
+    Source truth is glyph-outline aware, so invisible-text-layer statements
+    are held to the colour of the ink actually painted."""
+    src = _source_line_colors(src_pdf)
+    runs = _run_colors(prs)
+    mismatches = []
+    matched_src_colors, matched_out_colors = set(), set()
+    for txt, want in src.items():
+        hits = [c for t, c in runs if t == txt]
+        if not hits:
+            continue
+        wr, wg, wb = (want >> 16) & 255, (want >> 8) & 255, want & 255
+        ok = any(abs(((c >> 16) & 255) - wr) <= 40
+                 and abs(((c >> 8) & 255) - wg) <= 40
+                 and abs((c & 255) - wb) <= 40 for c in hits)
+        matched_src_colors.add(want)
+        if ok:
+            matched_out_colors.update(hits)
+        else:
+            mismatches.append((txt[:24], "#%06x" % want, "#%06x" % hits[0]))
+    res.check(not mismatches,
+              f"[{name}] run colours match source ink within tolerance "
+              f"(mismatched: {mismatches[:3]})")
+    if len(matched_src_colors) >= 2:
+        res.check(len(set(matched_out_colors)) >= 2,
+                  f"[{name}] palette not flattened to one colour "
+                  f"(source {len(matched_src_colors)} colours, output {len(set(matched_out_colors))})")
 
 
 def _family(font_name):
@@ -417,6 +663,10 @@ def run_pptx(engine, update_golden=False):
         check_fragments(prs, res, name)
         check_slashes(prs, src, res, name)
         check_tables(prs, src, res, name)
+        check_no_empty_tables(prs, res, name)
+        check_no_ghost_text(prs, src, res, name)
+        check_no_midword_wrap(prs, res, name)
+        check_colors(prs, src, res, name)
         check_text_insets(prs, res, name)
         check_fonts(prs, src, res, name)
         check_graphics(prs, src, res, name)

@@ -39,7 +39,8 @@ from app.extraction import (
     EMU_PER_PT, SAMPLE_DPI, FLAG_ITALIC, FLAG_BOLD,
     FontMapper, _int_color_to_rgb, _center, _point_in, _sample_fill,
     _collect_lines, _line_alignment, _attach_markers, _cluster_lines,
-    _split_paragraphs,
+    _split_paragraphs, _infer_aligned_tables, _inherit_glyph_colors,
+    _glyph_outline_drawings,
 )
 
 # --------------------------------------------------------------------------- #
@@ -49,6 +50,11 @@ HYBRID_DPI = 200            # render resolution for hybrid backgrounds
 NONTABLE_ART_COVERAGE = 0.03   # >3% of page area in non-table drawings -> hybrid
 # "No Style, Table Grid" - thin borders, no theme fills (we set fills per cell).
 TABLE_GRID_STYLE = "{5940675A-B579-460E-94D1-54222C63F5DA}"
+# "No Style, No Grid" - for INFERRED (unruled) tables: the source drew no
+# ruling lines, so the output must not invent them.
+TABLE_NO_GRID_STYLE = "{2D5ABB26-0587-4C30-8999-92F81FD0307C}"
+NOWRAP_MAX_WORDS = 5        # blocks this short keep their source line breaks
+WORD_FIT_SAFETY = 1.1       # substituted fonts can run a little wider
 
 
 # --------------------------------------------------------------------------- #
@@ -125,20 +131,47 @@ def _style_run(run, span, fonts: FontMapper):
         pass
 
 
-def _add_text_block(slide, cluster, scale, off_x, off_y, fonts: FontMapper):
+def _longest_word_width(cluster) -> float:
+    """Chars-proportional estimate of the widest single word in the block:
+    enough to guarantee the box can hold it, which stops mid-word wrapping."""
+    max_w = 0.0
+    for ln in cluster:
+        text = "".join(s["text"] for s in ln["spans"])
+        char_w = (ln["x1"] - ln["x0"]) / max(len(text), 1)
+        for wd in text.split():
+            max_w = max(max_w, len(wd) * char_w)
+    return max_w
+
+
+def _add_text_block(slide, cluster, scale, off_x, off_y, fonts: FontMapper,
+                    page_w: float = 0.0):
     x0 = min(c["x0"] for c in cluster)
     y0 = min(c["y0"] for c in cluster)
     x1 = max(c["x1"] for c in cluster)
     y1 = max(c["y1"] for c in cluster)
 
+    words = sum(len("".join(s["text"] for s in ln["spans"]).split()) for ln in cluster)
+    # Short header blocks ("END OF DAY / ACCOUNT BALANCE") must never re-wrap:
+    # keep the source's own line breaks and switch wrapping off entirely.
+    no_wrap_short = len(cluster) > 1 and words <= NOWRAP_MAX_WORDS
+    wrap = len(cluster) > 1 and not no_wrap_short
+
+    # a wrapping box must at minimum fit its longest word, or PowerPoint
+    # breaks mid-word; cap at the page's right edge
+    w_pt = max(x1 - x0, 1.0)
+    if wrap:
+        w_pt = max(w_pt, WORD_FIT_SAFETY * _longest_word_width(cluster))
+        if page_w:
+            w_pt = min(w_pt, max(page_w - x0, x1 - x0))
+
     left = Emu(int((off_x + x0 * scale) * EMU_PER_PT))
     top = Emu(int((off_y + y0 * scale) * EMU_PER_PT))
-    width = Emu(max(int((x1 - x0) * scale * EMU_PER_PT), EMU_PER_PT))
+    width = Emu(max(int(w_pt * scale * EMU_PER_PT), EMU_PER_PT))
     height = Emu(max(int((y1 - y0) * scale * EMU_PER_PT), EMU_PER_PT // 2))
 
     tb = slide.shapes.add_textbox(left, top, width, height)
     tf = tb.text_frame
-    tf.word_wrap = True
+    tf.word_wrap = wrap
     tf.auto_size = MSO_AUTO_SIZE.NONE          # never let PPT change the font size
     tf.vertical_anchor = MSO_ANCHOR.TOP
     tf.margin_left = 0
@@ -147,15 +180,20 @@ def _add_text_block(slide, cluster, scale, off_x, off_y, fonts: FontMapper):
     tf.margin_bottom = 0
 
     alignment = _line_alignment(cluster, x0, x1)
-    for pi, para in enumerate(_split_paragraphs(cluster)):
-        _emit_paragraph(tf, para, pi == 0, alignment, fonts)
+    if no_wrap_short:
+        # one paragraph per source line: the layout is the source's, verbatim
+        for li, ln in enumerate(cluster):
+            _emit_paragraph(tf, [ln], li == 0, alignment, fonts)
+    else:
+        for pi, para in enumerate(_split_paragraphs(cluster)):
+            _emit_paragraph(tf, para, pi == 0, alignment, fonts)
     return tb
 
 
 # --------------------------------------------------------------------------- #
 # PPTX placement: native tables
 # --------------------------------------------------------------------------- #
-def _set_table_grid_style(table):
+def _set_table_grid_style(table, style_id=TABLE_GRID_STYLE):
     tblPr = table._tbl.tblPr
     if tblPr is None:
         return
@@ -163,7 +201,7 @@ def _set_table_grid_style(table):
         if child.tag == qn("a:tableStyleId"):
             tblPr.remove(child)
     el = tblPr.makeelement(qn("a:tableStyleId"), {})
-    el.text = TABLE_GRID_STYLE
+    el.text = style_id
     tblPr.append(el)
 
 
@@ -215,7 +253,9 @@ def _add_table(slide, table, page_lines, pix, z, scale, off_x, off_y, fonts: Fon
     table_obj = gf.table
     table_obj.first_row = False
     table_obj.horz_banding = False
-    _set_table_grid_style(table_obj)
+    _set_table_grid_style(table_obj,
+                          TABLE_NO_GRID_STYLE if getattr(table, "inferred", False)
+                          else TABLE_GRID_STYLE)
 
     row0 = table.rows[0].cells
     for ci in range(ncols):
@@ -265,7 +305,7 @@ def _nontable_art_ratio(page, drawings, table_bboxes) -> float:
     return area / page_area
 
 
-def _render_hybrid_bg(src_doc, page_index, table_bboxes) -> bytes:
+def _render_hybrid_bg(src_doc, page_index, table_bboxes, glyph_rects=()) -> bytes:
     zoom = HYBRID_DPI / 72.0
     tmp = fitz.open()
     tmp.insert_pdf(src_doc, from_page=page_index, to_page=page_index)
@@ -274,6 +314,17 @@ def _render_hybrid_bg(src_doc, page_index, table_bboxes) -> bytes:
         pg.add_redact_annot(pg.rect, text=None)
         pg.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE,
                             graphics=fitz.PDF_REDACT_LINE_ART_NONE)
+        # Second pass: text painted as filled glyph-OUTLINE paths (invisible-
+        # text-layer statements). Redaction only removes text objects, so the
+        # painted word would survive as pixels while its invisible twin ships
+        # editable on top: ghost-doubled text. Cover each matched outline blob
+        # and remove line art fully inside it; background fills extend beyond
+        # the blob's bbox and survive.
+        if glyph_rects:
+            for r in glyph_rects:
+                pg.add_redact_annot(fitz.Rect(*r) + (-1, -1, 1, 1), text=None)
+            pg.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE,
+                                graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED)
     except Exception:
         tmp.close()
         tmp = fitz.open()
@@ -365,27 +416,47 @@ def convert_pdf_to_pptx(
 
         pages_with_text += 1
 
+        all_lines = _collect_lines(text_dict)
+        # run colours: text painted as glyph-outline paths carries its real
+        # colour on the paths, not on the (often invisible) text layer
+        _inherit_glyph_colors(all_lines, drawings, pw, ph)
+
         # ---- tables ----
         try:
             found = page.find_tables(strategy="lines")
-            tables = [t for t in found.tables if t.row_count >= 1 and t.col_count >= 1]
+            detected = [t for t in found.tables if t.row_count >= 1 and t.col_count >= 1]
         except Exception:
-            tables = []
+            detected = []
+        # A detected grid must contain text to be promoted to a native table:
+        # a decorative squares mark is graphics, not an empty 1xN table.
+        def _has_cell_text(t):
+            return any(_point_in(t.bbox, *_center(ln["bbox"])) for ln in all_lines)
+        ruled = [t for t in detected if _has_cell_text(t)]
+        demoted_grids = len(detected) - len(ruled)
+        # Unruled tables (statement ledgers without ruling lines) are
+        # recovered from column alignment and emitted native.
+        inferred = _infer_aligned_tables(all_lines, [t.bbox for t in ruled])
+        tables = ruled + inferred
         table_bboxes = [t.bbox for t in tables]
 
-        all_lines = _collect_lines(text_dict)
         loose_lines = [ln for ln in all_lines
                        if not any(_point_in(tb, *_center(ln["bbox"])) for tb in table_bboxes)]
 
         # ---- hybrid decision (non-table vector art only) ----
+        # A demoted text-less grid forces the hybrid background so the
+        # decoration still ships, as pixels in the background layer.
         art_ratio = _nontable_art_ratio(page, drawings, table_bboxes)
-        use_hybrid = art_ratio > NONTABLE_ART_COVERAGE
+        use_hybrid = art_ratio > NONTABLE_ART_COVERAGE or demoted_grids > 0
         pr = PageReport(page_number=i + 1, mode="hybrid" if use_hybrid else "native",
                         vector_paths=len(drawings))
 
         if use_hybrid:
             pr.note = f"non-table vector art ({art_ratio*100:.0f}% of page)"
-            png = _render_hybrid_bg(doc, i, table_bboxes)
+            if demoted_grids:
+                pr.note += f"; {demoted_grids} decorative grid(s) kept as graphics"
+            glyph_rects = [r for r, _ in
+                           _glyph_outline_drawings(drawings, all_lines, pw * ph)]
+            png = _render_hybrid_bg(doc, i, table_bboxes, glyph_rects)
             bg = slide.shapes.add_picture(
                 io.BytesIO(png),
                 Emu(int(off_x * EMU_PER_PT)), Emu(int(off_y * EMU_PER_PT)),
@@ -425,7 +496,7 @@ def convert_pdf_to_pptx(
         # ---- loose text as logical blocks ----
         loose_lines = _attach_markers(loose_lines)
         for cluster in _cluster_lines(loose_lines):
-            _add_text_block(slide, cluster, scale, off_x, off_y, fonts)
+            _add_text_block(slide, cluster, scale, off_x, off_y, fonts, pw)
             pr.text_boxes += 1
 
         pr.substituted_fonts = [f"{k} -> {v}" for k, v in sorted(fonts.substitutions.items())]

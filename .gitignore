@@ -24,3 +24,9 @@ dist/
 dist_installer/
 packaging/build/
 *.spec.bak
+
+# Real-world corpus: manifest.json is committed (URLs, rebuildable); the
+# downloaded PDFs and run outputs stay local. Never commit corpus binaries.
+tests/corpus/real/docs/
+tests/corpus/triage/
+tests/corpus/corpus_scores.json
