@@ -1,6 +1,5 @@
 {
- "median": 0.6691,
- "real_median": 0.5618,
- "worst_page_floor": 0.035,
- "synthetic_median": 0.6986
+ "synthetic_median": 0.7131,
+ "real_median": 0.6396,
+ "worst_page_floor": 0.1727
 }
