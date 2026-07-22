@@ -45,7 +45,9 @@ from pptx import Presentation
 from pptx.util import Emu
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
-from app.converter import convert_pdf_to_pptx
+from app.converter import (convert_pdf_to_pptx, _table_cells_tabular,
+                           PROSE_CELL_CHARS, PROSE_MAX_TEXT_CELLS,
+                           MIN_TABULAR_CELLS)
 from app.edit_model import EditSession
 from app.extraction import (_collect_lines, _infer_aligned_tables,
                             _inherit_glyph_colors, _point_in, _center)
@@ -183,7 +185,9 @@ def _native_tables(prs):
 def _source_tables(src_pdf):
     """Expected tables per page, engine-independently: ruled tables that
     CONTAIN text (a text-less decorative grid is graphics, not a table),
-    plus unruled tables recovered by column-alignment inference."""
+    plus unruled tables recovered by column-alignment inference, minus every
+    grid whose cells hold prose rather than tabular content (a bordered
+    callout is furniture however it was detected)."""
     doc = fitz.open(src_pdf)
     per_page = []
     for i in range(doc.page_count):
@@ -196,6 +200,8 @@ def _source_tables(src_pdf):
                  if t.row_count >= 1 and t.col_count >= 1
                  and any(_point_in(t.bbox, *_center(ln["bbox"])) for ln in lines)]
         inferred = _infer_aligned_tables(lines, [t.bbox for t in ruled])
+        ruled = [t for t in ruled if _table_cells_tabular(t, lines)]
+        inferred = [t for t in inferred if _table_cells_tabular(t, lines)]
         per_page.append({"ruled": ruled, "inferred": inferred, "lines": lines})
     doc.close()
     return per_page
@@ -246,6 +252,29 @@ def check_no_empty_tables(prs, res, name):
                 if not any(c.text.strip() for row in sh.table.rows for c in row.cells):
                     empty += 1
     res.check(empty == 0, f"[{name}] no native table with all-empty cells (found: {empty})")
+
+
+def check_no_prose_tables(prs, res, name):
+    """A bordered callout must not ship as a native table.
+
+    Read off the OUTPUT alone, so it holds for any engine: a shipped table
+    whose cells are nearly all empty, or which is one paragraph plus a label,
+    is a box drawn around prose. Inside a table that prose reflows into a
+    column one cell wide (fault: a ruled 2x2 around a whole guidance column,
+    the real corpus's worst page at 0.1414).
+    """
+    bad = []
+    for si, sl in enumerate(prs.slides, 1):
+        for sh in sl.shapes:
+            if not sh.has_table:
+                continue
+            lens = [len(c.text.strip()) for row in sh.table.rows for c in row.cells]
+            filled = [n for n in lens if n > 0]
+            if len(filled) < MIN_TABULAR_CELLS:
+                bad.append(f"slide {si}: {len(filled)} cell(s) with text")
+            elif len(filled) <= PROSE_MAX_TEXT_CELLS and max(lens) >= PROSE_CELL_CHARS:
+                bad.append(f"slide {si}: {max(lens)} chars in one of {len(filled)} filled cells")
+    res.check(not bad, f"[{name}] no bordered callout shipped as a table ({bad[:2]})")
 
 
 def _editable_text(prs):
@@ -664,6 +693,7 @@ def run_pptx(engine, update_golden=False):
         check_slashes(prs, src, res, name)
         check_tables(prs, src, res, name)
         check_no_empty_tables(prs, res, name)
+        check_no_prose_tables(prs, res, name)
         check_no_ghost_text(prs, src, res, name)
         check_no_midword_wrap(prs, res, name)
         check_colors(prs, src, res, name)

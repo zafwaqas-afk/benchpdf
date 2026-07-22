@@ -53,6 +53,9 @@ TABLE_GRID_STYLE = "{5940675A-B579-460E-94D1-54222C63F5DA}"
 # "No Style, No Grid" - for INFERRED (unruled) tables: the source drew no
 # ruling lines, so the output must not invent them.
 TABLE_NO_GRID_STYLE = "{2D5ABB26-0587-4C30-8999-92F81FD0307C}"
+PROSE_CELL_CHARS = 300      # a cell holding this much text holds a paragraph
+MIN_TABULAR_CELLS = 2       # one populated cell states no relationship
+PROSE_MAX_TEXT_CELLS = 3    # ... and neither does a paragraph plus a label
 NOWRAP_MAX_WORDS = 5        # blocks this short keep their source line breaks
 WORD_FIT_SAFETY = 1.1       # substituted fonts can run a little wider
 
@@ -212,6 +215,30 @@ def _lines_in(bbox, lines):
         if _point_in(bbox, cx, cy):
             out.append(ln)
     return out
+
+
+def _table_cells_tabular(table, lines) -> bool:
+    """A bordered callout is not a table.
+
+    Judged on cell CONTENT, so it applies to every table however it was
+    detected. A govuk guidance page shipped a ruled 2x2 holding one
+    1,600-character paragraph in one cell, two cells empty and the page number
+    in the last: a box drawn around prose, whose text reflows inside a native
+    table into a column one cell wide. A table earns its cells by using them:
+    two of them must carry text, and a cell-sized paragraph is only tabular
+    when enough other cells answer it.
+    """
+    cells = [c for row in table.rows for c in row.cells if c is not None]
+    if not cells:
+        return False
+    lens = [sum(len(s["text"].strip()) for ln in _lines_in(c, lines) for s in ln["spans"])
+            for c in cells]
+    text_cells = sum(1 for n in lens if n > 0)
+    if text_cells < MIN_TABULAR_CELLS:
+        return False
+    if text_cells <= PROSE_MAX_TEXT_CELLS and max(lens) >= PROSE_CELL_CHARS:
+        return False
+    return True
 
 
 def _fill_cell(cell, para_lines, fonts: FontMapper, fill_rgb, is_dark):
@@ -436,7 +463,10 @@ def convert_pdf_to_pptx(
         # Unruled tables (statement ledgers without ruling lines) are
         # recovered from column alignment and emitted native.
         inferred = _infer_aligned_tables(all_lines, [t.bbox for t in ruled])
-        tables = ruled + inferred
+        # A table whose cells hold prose rather than tabular content is
+        # furniture: its border stays in the background layer and its text
+        # flows as ordinary text boxes.
+        tables = [t for t in ruled + inferred if _table_cells_tabular(t, all_lines)]
         table_bboxes = [t.bbox for t in tables]
 
         loose_lines = [ln for ln in all_lines
