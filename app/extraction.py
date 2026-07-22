@@ -217,12 +217,36 @@ def _is_marker(line) -> bool:
     return all((c in BULLET_LIKE) or (0xF000 <= ord(c) <= 0xF0FF) or c in "-*" for c in txt)
 
 
+_MARKER_START = re.compile(r"^\s*(\S)\s")
+
+
+def _starts_with_marker(line) -> bool:
+    """A list whose markers were never separate glyph runs.
+
+    Bank of England reports draw each item as one line already reading
+    " Andrew Bailey, Chair": there is no marker line for _attach_markers to
+    find, so nothing flagged the item as a list item, and nine evenly-leaded
+    bullets clustered into ONE paragraph and reflowed onto two lines. A line
+    that opens with a bullet glyph and a space is a list item however the
+    marker got there.
+    """
+    txt = "".join(s.get("text", "") for s in line["spans"])
+    m = _MARKER_START.match(txt)
+    if not m:
+        return False
+    c = m.group(1)
+    return (c in BULLET_LIKE) or c == "*" or (0xF000 <= ord(c) <= 0xF0FF)
+
+
 def _attach_markers(lines) -> list:
     """Merge bullet-marker lines into the text line they introduce, turning them
     into a real "• " prefix so a list becomes one text box of bulleted paragraphs
     rather than a swarm of tiny fragments."""
     markers = [l for l in lines if _is_marker(l)]
     texts = [l for l in lines if not _is_marker(l)]
+    for t in texts:
+        if _starts_with_marker(t):
+            t["bullet"] = True
     for m in markers:
         mcy = (m["y0"] + m["y1"]) / 2
         best, best_d = None, 1e9
