@@ -146,6 +146,51 @@ def _longest_word_width(cluster) -> float:
     return max_w
 
 
+def _source_leading(cluster) -> float:
+    """The source's own line pitch, in points, or 0 when there isn't one to read.
+
+    PowerPoint otherwise sets its own leading from the font, which is tighter
+    than most documents': the W3C working draft leads 14pt text at 18.7pt, so a
+    25-item list ended 130pt above where it should and the whole page read as
+    vertically compressed. Bounded, because a block whose lines are not evenly
+    pitched (a heading over a paragraph) has no single leading to impose.
+    """
+    if len(cluster) < 2:
+        return 0.0
+    deltas = sorted(d for d in (cluster[i]["y0"] - cluster[i - 1]["y0"]
+                                for i in range(1, len(cluster))) if d > 0)
+    if len(deltas) < 2:
+        return 0.0
+    med = deltas[len(deltas) // 2]
+    size = max((l["size"] for l in cluster), default=1.0) or 1.0
+    if med < size * 0.9 or med > size * 2.5:
+        return 0.0
+    return med
+
+
+def _paragraph_indents(paras, block_x0) -> list:
+    """Where each paragraph sits inside its block, in points from the block's
+    left edge: (left_indent, first_line_indent).
+
+    A list is one text box of paragraphs, and every paragraph used to start at
+    the box's left edge. On the W3C working draft that flattened two nesting
+    levels onto one margin and threw away the hanging indent that puts a
+    wrapped line clear of its own bullet. Both are in the source geometry: the
+    first line's x0 gives the outdent, the continuation lines' give the margin.
+    """
+    out = []
+    for para in paras:
+        first_x = para[0]["x0"] - block_x0
+        rest = para[1:]
+        # left_indent applies to every line; first_line_indent shifts only the
+        # first, and is negative for a hanging indent, positive for a
+        # first-line one.
+        cont_x = (min(l["x0"] for l in rest) - block_x0) if rest else first_x
+        mar_l = max(cont_x, 0.0)
+        out.append((mar_l, first_x - mar_l))
+    return out
+
+
 def _add_text_block(slide, cluster, scale, off_x, off_y, fonts: FontMapper,
                     page_w: float = 0.0):
     x0 = min(c["x0"] for c in cluster)
@@ -182,14 +227,30 @@ def _add_text_block(slide, cluster, scale, off_x, off_y, fonts: FontMapper,
     tf.margin_top = 0
     tf.margin_bottom = 0
 
+    lead = _source_leading(cluster)
     alignment = _line_alignment(cluster, x0, x1)
+    paras, indents = [], None
     if no_wrap_short:
         # one paragraph per source line: the layout is the source's, verbatim
         for li, ln in enumerate(cluster):
-            _emit_paragraph(tf, [ln], li == 0, alignment, fonts)
+            paras.append(_emit_paragraph(tf, [ln], li == 0, alignment, fonts))
     else:
-        for pi, para in enumerate(_split_paragraphs(cluster)):
-            _emit_paragraph(tf, para, pi == 0, alignment, fonts)
+        split = _split_paragraphs(cluster)
+        for pi, para in enumerate(split):
+            paras.append(_emit_paragraph(tf, para, pi == 0, alignment, fonts))
+        indents = _paragraph_indents(split, x0)
+    if lead:
+        for p in paras:
+            p.line_spacing = Pt(lead * scale)
+    if indents:
+        # python-pptx exposes no left/first-line indent on a paragraph, so the
+        # attributes go straight onto a:pPr - the same two attributes the
+        # browser engine stamps into its OOXML.
+        for p, (mar_l, first) in zip(paras, indents):
+            if abs(mar_l) > 0.5 or abs(first) > 0.5:
+                pPr = p._p.get_or_add_pPr()
+                pPr.set("marL", str(int(round(mar_l * scale * EMU_PER_PT))))
+                pPr.set("indent", str(int(round(first * scale * EMU_PER_PT))))
     return tb
 
 

@@ -44,14 +44,16 @@ import fitz
 from pptx import Presentation
 from pptx.util import Emu
 from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.oxml.ns import qn
 
-from app.converter import (convert_pdf_to_pptx, _table_cells_tabular,
+from app.converter import (convert_pdf_to_pptx, _table_cells_tabular, _paragraph_indents,
                            PROSE_CELL_CHARS, PROSE_MAX_TEXT_CELLS,
                            MIN_TABULAR_CELLS)
 from app.edit_model import EditSession
 from app.extraction import (_collect_lines, _infer_aligned_tables,
                             _inherit_glyph_colors, _point_in, _center,
-                            _font_is_dingbat)
+                            _font_is_dingbat, _attach_markers, _cluster_lines,
+                            _split_paragraphs)
 from app.pdf_edit_export import export_edited_pdf
 from app.convert_pdf_misc import pdf_to_images, pdf_to_text
 from tests.engines import ENGINES, EngineUnavailable
@@ -334,6 +336,57 @@ def check_lists(prs, src_pdf, res, name):
     # a dingbat glyph mapped into a text font is a stray letter beside the item
     res.check(not dingbats,
               f"[{name}] list markers normalised, not shipped as dingbats ({sorted(dingbats)})")
+
+
+def check_paragraph_indents(prs, src_pdf, res, name):
+    """Paragraphs at the same source indent must land at the same output marL,
+    and paragraphs at different source indents must not.
+
+    Stated as equality classes, so it needs no page-scale factor and holds for
+    either engine. The absolute values were right and the ORDER was wrong once:
+    PptxGenJS emits one a:pPr per run, not per paragraph, so stamping by tag
+    order scattered 22 paragraphs' indents across the wrong paragraphs. The
+    whole suite stayed green through it.
+    """
+    doc = fitz.open(src_pdf)
+    expected = {}
+    for i in range(doc.page_count):
+        lines = _attach_markers(_collect_lines(doc[i].get_text("dict")))
+        for cluster in _cluster_lines(lines):
+            paras = _split_paragraphs(cluster)
+            x0 = min(l["x0"] for l in cluster)
+            for para, (mar_l, _first) in zip(paras, _paragraph_indents(paras, x0)):
+                key = " ".join("".join(s["text"] for s in para[0]["spans"]).split())
+                if key:
+                    expected[key] = round(mar_l, 1)
+    doc.close()
+    if len(set(expected.values())) < 2:
+        res.skip(f"[{name}] source has one indent level")
+        return
+
+    seen = {}          # source marL -> output marL
+    clashes = []
+    for sl in prs.slides:
+        for sh in sl.shapes:
+            if not sh.has_text_frame:
+                continue
+            for para in sh.text_frame.paragraphs:
+                txt = " ".join(para.text.split())
+                if not txt:
+                    continue
+                src = next((v for k, v in expected.items() if txt.startswith(k[:24])), None)
+                if src is None:
+                    continue
+                pPr = para._p.find(qn("a:pPr"))
+                out = int(pPr.get("marL", "0")) if pPr is not None else 0
+                if src in seen and seen[src] != out:
+                    clashes.append(f"{txt[:22]!r} src={src} got {out} vs {seen[src]}")
+                seen.setdefault(src, out)
+    res.check(not clashes,
+              f"[{name}] equal source indents give equal output indents ({clashes[:2]})")
+    inverted = len(set(seen.values())) < len(seen)
+    res.check(not inverted,
+              f"[{name}] distinct source indents stay distinct ({sorted(seen.items())})")
 
 
 def _editable_text(prs):
@@ -760,6 +813,7 @@ def run_pptx(engine, update_golden=False):
         check_no_empty_tables(prs, res, name)
         check_no_prose_tables(prs, res, name)
         check_lists(prs, src, res, name)
+        check_paragraph_indents(prs, src, res, name)
         check_no_ghost_text(prs, src, res, name)
         check_no_midword_wrap(prs, res, name)
         check_colors(prs, src, res, name)
