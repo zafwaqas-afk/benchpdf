@@ -150,9 +150,15 @@ def _emit_paragraph(text_frame, para_lines, first, alignment, fonts: FontMapper,
             sep = p.add_run()
             sep.text = " "
             _style_run(sep, first_span, fonts)
-        # each source line keeps its own width, so PowerPoint re-breaks the
-        # paragraph where the source broke it
-        track = _line_tracking(ln, fonts, ln["x1"] - ln["x0"]) if track_lines else 0.0
+        # Only lines that actually WRAPPED are tracked, which is every line of
+        # the paragraph but its last. A line that ended because the paragraph
+        # ended - a list item, a closing line - never broke, gains nothing from
+        # being restored to its width, and only picks up distorted letter
+        # spacing. Tracking every line cost boe_mpr_2025_08 p3 0.108 and
+        # w3c_svg10_2001 0.021 of mean while helping the prose pages.
+        wrapped = li < len(para_lines) - 1
+        track = (_line_tracking(ln, fonts, ln["x1"] - ln["x0"])
+                 if (track_lines and wrapped) else 0.0)
         for sp in ln["spans"]:
             run = p.add_run()
             run.text = sp["text"]
