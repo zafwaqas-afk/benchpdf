@@ -18,11 +18,11 @@
 
   pdfjs.GlobalWorkerOptions.workerSrc = "/assets/vendor/pdfjs/pdf.worker.min.mjs";
 
-  const convert = async (bytes) => {
+  const convert = async (bytes, opts) => {
     const buf = new Uint8Array(bytes).buffer;
     const { blob, report } = await convertPdfToPptx(buf, {
       pdfjs, PptxGenJS: window.PptxGenJS, PDFLib: window.PDFLib, JSZip: window.JSZip,
-    });
+    }, () => {}, opts || {});
     const out = new Uint8Array(await blob.arrayBuffer());
     let s = "";
     const CHUNK = 0x8000;
@@ -31,7 +31,7 @@
     }
     return { pptx: btoa(s), report };
   };
-  window.convertToPptx = async (bytes) => (await convert(bytes)).pptx;
+  window.convertToPptx = async (bytes, opts) => (await convert(bytes, opts)).pptx;
   // the engine's own per-page report (mode, confidence breakdown, notes),
   // for suite checks that assert on WHY a page shipped the way it did
   window.convertToPptxWithReport = convert;

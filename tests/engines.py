@@ -60,6 +60,10 @@ class _Server(socketserver.ThreadingTCPServer):
 
 
 class BrowserEngine:
+    # Which text layout the corpus and suite exercise. "flow" is what the site
+    # ships by default; set BENCHPDF_TEXT_MODE=layout to score the other one.
+    mode = os.environ.get("BENCHPDF_TEXT_MODE", "flow")
+
     """The quarantined JS engine, driven in headless Chromium.
 
     Serves the site's vendored libraries and tests/js_engine/ together, then
@@ -115,7 +119,9 @@ class BrowserEngine:
                 pg.goto(f"http://127.0.0.1:{port}/harness.html", wait_until="load")
                 pg.wait_for_function("window.harnessReady === true", timeout=30000)
                 data = list(open(src_pdf, "rb").read())
-                b64 = pg.evaluate("bytes => window.convertToPptx(bytes)", data)
+                b64 = pg.evaluate(
+                    "([bytes, opts]) => window.convertToPptx(bytes, opts)",
+                    [data, {"mode": self.mode}])
                 b.close()
             if not b64:
                 raise EngineUnavailable("harness returned nothing: " + "; ".join(errors))
