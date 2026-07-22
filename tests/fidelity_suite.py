@@ -50,7 +50,8 @@ from app.converter import (convert_pdf_to_pptx, _table_cells_tabular,
                            MIN_TABULAR_CELLS)
 from app.edit_model import EditSession
 from app.extraction import (_collect_lines, _infer_aligned_tables,
-                            _inherit_glyph_colors, _point_in, _center)
+                            _inherit_glyph_colors, _point_in, _center,
+                            _font_is_dingbat)
 from app.pdf_edit_export import export_edited_pdf
 from app.convert_pdf_misc import pdf_to_images, pdf_to_text
 from tests.engines import ENGINES, EngineUnavailable
@@ -277,6 +278,64 @@ def check_no_prose_tables(prs, res, name):
     res.check(not bad, f"[{name}] no bordered callout shipped as a table ({bad[:2]})")
 
 
+def check_lists(prs, src_pdf, res, name):
+    """A bulleted list must arrive as one paragraph per item, and its marker
+    must arrive as a bullet.
+
+    The W3C WCAG working draft sets every marker as a 7pt ZapfDingbats "H",
+    which draws a hollow circle. Nothing about the code point says "bullet",
+    so nothing flagged the lines as list items and 25 entries clustered into
+    ONE reflowing paragraph - the real corpus's worst page. Counted off the
+    source PDF and the .pptx, so it holds for any engine.
+    """
+    # The source count is computed HERE, from font names and code points in the
+    # PDF, and deliberately does NOT call the engine's marker detector: routing
+    # it through _attach_markers would make the expectation collapse to zero
+    # whenever the detector broke, and the check would skip instead of fail.
+    dingbat_tokens = ("zapfdingbats", "dingbat", "wingding", "webding")
+    bullets = "•◦‣·∙▪▫◾"
+    doc = fitz.open(src_pdf)
+    want = 0
+    for i in range(doc.page_count):
+        for blk in doc[i].get_text("dict")["blocks"]:
+            for ln in blk.get("lines", []):
+                spans = [s for s in ln.get("spans", []) if (s.get("text") or "").strip()]
+                if len(spans) < 2:
+                    continue
+                glyph = spans[0]["text"].strip()
+                if len(glyph) != 1:
+                    continue
+                fname = (spans[0].get("font") or "").lower()
+                if (any(t in fname for t in dingbat_tokens)
+                        or glyph in bullets or 0xF000 <= ord(glyph) <= 0xF0FF):
+                    want += 1
+    doc.close()
+    if not want:
+        res.skip(f"[{name}] no list markers in source")
+        return
+
+    got, dingbats = 0, set()
+    for sl in prs.slides:
+        for sh in sl.shapes:
+            frames = []
+            if sh.has_text_frame:
+                frames.append(sh.text_frame)
+            elif sh.has_table:
+                frames.extend(c.text_frame for row in sh.table.rows for c in row.cells)
+            for tf in frames:
+                for para in tf.paragraphs:
+                    if para.text.lstrip().startswith("•"):
+                        got += 1
+                    for r in para.runs:
+                        if _font_is_dingbat(r.font.name):
+                            dingbats.add(r.font.name)
+    res.check(got >= want,
+              f"[{name}] every list item keeps its own paragraph (source {want}, output {got})")
+    # a dingbat glyph mapped into a text font is a stray letter beside the item
+    res.check(not dingbats,
+              f"[{name}] list markers normalised, not shipped as dingbats ({sorted(dingbats)})")
+
+
 def _editable_text(prs):
     parts = []
     for sl in prs.slides:
@@ -493,6 +552,12 @@ def check_fonts(prs, src_pdf, res, name):
         for blk in doc[i].get_text("dict")["blocks"]:
             for ln in blk.get("lines", []):
                 for sp in ln["spans"]:
+                    # A dingbat font is not typography, it is list markers, and
+                    # the engine deliberately normalises those to a bullet in
+                    # the text's own font. Counting it as a source family would
+                    # make correct normalisation read as a collapse.
+                    if _font_is_dingbat(sp["font"]):
+                        continue
                     src.add(_family(sp["font"]))
     doc.close()
 
@@ -694,6 +759,7 @@ def run_pptx(engine, update_golden=False):
         check_tables(prs, src, res, name)
         check_no_empty_tables(prs, res, name)
         check_no_prose_tables(prs, res, name)
+        check_lists(prs, src, res, name)
         check_no_ghost_text(prs, src, res, name)
         check_no_midword_wrap(prs, res, name)
         check_colors(prs, src, res, name)

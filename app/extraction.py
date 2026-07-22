@@ -208,16 +208,63 @@ BULLET_LIKE = set("•◦‣·∙▪▫◾--")
 
 
 def _is_marker(line) -> bool:
-    """A standalone bullet/marker glyph line (e.g. •, ‣, or a symbol-font PUA bullet)."""
+    """A standalone bullet/marker glyph line (e.g. •, ‣, or a symbol-font PUA bullet).
+
+    A lone glyph from a dingbat font counts whatever its code point: the whole
+    font is ornaments, and a detached ZapfDingbats "H" is a hollow circle.
+    """
     txt = "".join(s.get("text", "") for s in line["spans"]).strip()
     if not txt or len(txt) > 2:
         return False
     if (line["x1"] - line["x0"]) > 14:
         return False
+    if all(_font_is_dingbat(s.get("font")) for s in line["spans"] if (s.get("text") or "").strip()):
+        return True
     return all((c in BULLET_LIKE) or (0xF000 <= ord(c) <= 0xF0FF) or c in "-*" for c in txt)
 
 
 _MARKER_START = re.compile(r"^\s*(\S)\s")
+
+# A bullet is not a character, it is a character in a dingbat font. The W3C
+# WCAG working draft sets every list marker as a 7pt ZapfDingbats "H", which
+# draws a hollow circle; the outer level uses "G". Nothing about the code point
+# says "bullet" - it is an ASCII letter - so every code-point test missed it,
+# the table of contents clustered into ONE paragraph, and 25 entries reflowed
+# into a block of prose. It was the corpus's worst page.
+#
+# A whole dingbat font is ornaments, so any lone glyph from one leads a list
+# item. Symbol fonts are NOT: they carry Greek and maths, and arXiv papers open
+# lines with them, so a Symbol glyph must still look like a bullet (Bank of
+# England's markers are U+F0B7 in SymbolMT).
+DINGBAT_FONTS = ("zapfdingbats", "dingbat", "wingding", "webding")
+
+
+def _font_is_dingbat(name) -> bool:
+    n = (name or "").lower()
+    return any(d in n for d in DINGBAT_FONTS)
+
+
+def _bullet_shaped(glyph) -> bool:
+    return (glyph in BULLET_LIKE) or glyph == "*" or (0xF000 <= ord(glyph) <= 0xF0FF)
+
+
+def _leading_marker_span(line) -> int:
+    """Index of a leading marker span, or -1.
+
+    The marker must be a lone glyph with real text after it, or it is a drop
+    cap or a maths run, not a list item.
+    """
+    spans = line.get("spans") or []
+    if len(spans) < 2:
+        return -1
+    glyph = (spans[0].get("text") or "").strip()
+    if len(glyph) != 1:
+        return -1
+    if not any((s.get("text") or "").strip() for s in spans[1:]):
+        return -1
+    if _font_is_dingbat(spans[0].get("font")):
+        return 0
+    return 0 if _bullet_shaped(glyph) else -1
 
 
 def _starts_with_marker(line) -> bool:
@@ -245,7 +292,19 @@ def _attach_markers(lines) -> list:
     markers = [l for l in lines if _is_marker(l)]
     texts = [l for l in lines if not _is_marker(l)]
     for t in texts:
-        if _starts_with_marker(t):
+        mi = _leading_marker_span(t)
+        if mi >= 0:
+            # Normalise the marker to a real bullet at the text's own size.
+            # Left alone, a 7pt ZapfDingbats "H" maps to a substituted font and
+            # ships as a tiny letter H beside every list item.
+            after = t["spans"][mi + 1:]
+            body = next((s for s in after if (s.get("text") or "").strip()), after[0])
+            t["spans"] = [{"text": "• ", "font": body.get("font", ""),
+                           "size": t["size"],
+                           "flags": int(body.get("flags", 0)) & ~FLAG_BOLD,
+                           "color": body.get("color", 0)}] + after
+            t["bullet"] = True
+        elif _starts_with_marker(t):
             t["bullet"] = True
     for m in markers:
         mcy = (m["y0"] + m["y1"]) / 2
