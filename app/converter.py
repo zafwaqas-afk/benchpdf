@@ -96,12 +96,13 @@ class ConversionReport:
 # --------------------------------------------------------------------------- #
 # PPTX placement: text blocks
 # --------------------------------------------------------------------------- #
-def _emit_paragraph(text_frame, para_lines, first, alignment, fonts: FontMapper):
+def _emit_paragraph(text_frame, para_lines, first, alignment, fonts: FontMapper,
+                    space_before: float = 0.0):
     """Write one paragraph's lines as a single wrapped paragraph (space-joined)."""
     p = text_frame.paragraphs[0] if first else text_frame.add_paragraph()
     if alignment is not None:
         p.alignment = alignment
-    p.space_before = Pt(0)
+    p.space_before = Pt(space_before)
     p.space_after = Pt(0)
     prev_text = ""
     for li, ln in enumerate(para_lines):
@@ -166,6 +167,25 @@ def _source_leading(cluster) -> float:
     if med < size * 0.9 or med > size * 2.5:
         return 0.0
     return med
+
+
+def _paragraph_gaps(paras, lead) -> list:
+    """The air the source leaves above each paragraph, in points.
+
+    A block used to emit its paragraphs hard against each other, because
+    space_before was pinned to zero. Documents separate paragraphs with a
+    blank line: the SEC chairman's letter (the corpus's worst page) leaves
+    about half a line above each one, and without it the whole column runs
+    together and ends short. What the source leaves is whatever exceeds the
+    block's own leading, so it is only readable once that leading is known.
+    """
+    gaps = [0.0] * len(paras)
+    if not lead:
+        return gaps
+    for i in range(1, len(paras)):
+        extra = paras[i][0]["y0"] - paras[i - 1][-1]["y0"] - lead
+        gaps[i] = extra if extra > 0.5 else 0.0
+    return gaps
 
 
 def _paragraph_indents(paras, block_x0) -> list:
@@ -236,8 +256,10 @@ def _add_text_block(slide, cluster, scale, off_x, off_y, fonts: FontMapper,
             paras.append(_emit_paragraph(tf, [ln], li == 0, alignment, fonts))
     else:
         split = _split_paragraphs(cluster)
+        gaps = _paragraph_gaps(split, lead)
         for pi, para in enumerate(split):
-            paras.append(_emit_paragraph(tf, para, pi == 0, alignment, fonts))
+            paras.append(_emit_paragraph(tf, para, pi == 0, alignment, fonts,
+                                         gaps[pi] * scale))
         indents = _paragraph_indents(split, x0)
     if lead:
         for p in paras:
