@@ -40,7 +40,7 @@ from app.extraction import (
     FontMapper, _int_color_to_rgb, _center, _point_in, _sample_fill,
     _collect_lines, _line_alignment, _attach_markers, _cluster_lines,
     _split_paragraphs, _infer_aligned_tables, _inherit_glyph_colors,
-    _glyph_outline_drawings,
+    _glyph_outline_drawings, _text_width_pt,
 )
 
 # --------------------------------------------------------------------------- #
@@ -58,6 +58,7 @@ MIN_TABULAR_CELLS = 2       # one populated cell states no relationship
 PROSE_MAX_TEXT_CELLS = 3    # ... and neither does a paragraph plus a label
 NOWRAP_MAX_WORDS = 5        # blocks this short keep their source line breaks
 WORD_FIT_SAFETY = 1.1       # substituted fonts can run a little wider
+TRACK_MAX_EM = 0.08         # never squeeze or open more than this per char
 
 
 # --------------------------------------------------------------------------- #
@@ -96,8 +97,45 @@ class ConversionReport:
 # --------------------------------------------------------------------------- #
 # PPTX placement: text blocks
 # --------------------------------------------------------------------------- #
+def _line_tracking(ln, fonts: FontMapper, src_width: float) -> float:
+    """Points per character to add (or remove) so this line occupies src_width.
+
+    A wrapping paragraph is re-broken by PowerPoint, and the metric-compatible
+    substitute is never exactly the source font, so it wraps at different words
+    and the column drifts. Measured against the corpus, the PDF's own line
+    breaks are worth about 0.025 of real median over reflowed ones, and the
+    drift is what compounds into blocks overflowing their box.
+
+    Rather than give up reflow - which is what keeps the text editable, a
+    paragraph the reader can retype and have re-wrap - each source line gets
+    the tracking that restores its original width, so PowerPoint's greedy wrap
+    breaks it where the source broke it. Clamped hard, because a bad
+    measurement must degrade to slightly-wrong spacing, never to unreadable
+    text; unmeasurable text gets no tracking at all.
+    """
+    if src_width <= 0:
+        return 0.0
+    measured = 0.0
+    chars = 0
+    max_size = 0.0
+    for sp in ln["spans"]:
+        text = sp.get("text") or ""
+        if not text:
+            continue
+        flags = int(sp.get("flags", 0))
+        size = float(sp.get("size", 10.0)) or 10.0
+        measured += _text_width_pt(text, fonts.map(sp.get("font", ""), flags), size,
+                                   bool(flags & FLAG_BOLD), bool(flags & FLAG_ITALIC))
+        chars += len(text)
+        max_size = max(max_size, size)
+    if not measured or chars < 2:
+        return 0.0
+    limit = TRACK_MAX_EM * (max_size or 10.0)
+    return max(-limit, min(limit, (src_width - measured) / chars))
+
+
 def _emit_paragraph(text_frame, para_lines, first, alignment, fonts: FontMapper,
-                    space_before: float = 0.0):
+                    space_before: float = 0.0, track_lines: bool = False):
     """Write one paragraph's lines as a single wrapped paragraph (space-joined)."""
     p = text_frame.paragraphs[0] if first else text_frame.add_paragraph()
     if alignment is not None:
@@ -112,10 +150,15 @@ def _emit_paragraph(text_frame, para_lines, first, alignment, fonts: FontMapper,
             sep = p.add_run()
             sep.text = " "
             _style_run(sep, first_span, fonts)
+        # each source line keeps its own width, so PowerPoint re-breaks the
+        # paragraph where the source broke it
+        track = _line_tracking(ln, fonts, ln["x1"] - ln["x0"]) if track_lines else 0.0
         for sp in ln["spans"]:
             run = p.add_run()
             run.text = sp["text"]
             _style_run(run, sp, fonts)
+            if track:
+                run.font._rPr.set("spc", str(int(round(track * 100))))
             prev_text = sp["text"]
     return p
 
@@ -259,7 +302,7 @@ def _add_text_block(slide, cluster, scale, off_x, off_y, fonts: FontMapper,
         gaps = _paragraph_gaps(split, lead)
         for pi, para in enumerate(split):
             paras.append(_emit_paragraph(tf, para, pi == 0, alignment, fonts,
-                                         gaps[pi] * scale))
+                                         gaps[pi] * scale, track_lines=wrap))
         indents = _paragraph_indents(split, x0)
     if lead:
         for p in paras:

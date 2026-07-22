@@ -20,6 +20,7 @@ target-specific placement logic to this module.
 
 from __future__ import annotations
 
+import os
 import re
 
 import fitz
@@ -66,6 +67,58 @@ FALLBACK_SANS = "Arial"
 FALLBACK_SERIF = "Georgia"
 FALLBACK_MONO = "Consolas"
 FALLBACK_SYMBOL = "Segoe UI Symbol"
+
+# Width measurement for the SUBSTITUTED font, so a reflowed paragraph can be
+# tracked back to the source's line widths. The browser engine measures with
+# canvas; here the real Windows font file is measured through PyMuPDF, which is
+# already a dependency. A family whose file is missing measures 0 and gets no
+# tracking at all - the same safe degradation as a browser lacking the family.
+_WIN_FONTS = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "Fonts")
+_FONT_FILES = {
+    # family: (regular, bold, italic, bold-italic)
+    "arial": ("arial.ttf", "arialbd.ttf", "ariali.ttf", "arialbi.ttf"),
+    "calibri": ("calibri.ttf", "calibrib.ttf", "calibrii.ttf", "calibriz.ttf"),
+    "cambria": ("cambria.ttc", "cambriab.ttf", "cambriai.ttf", "cambriaz.ttf"),
+    "consolas": ("consola.ttf", "consolab.ttf", "consolai.ttf", "consolaz.ttf"),
+    "courier new": ("cour.ttf", "courbd.ttf", "couri.ttf", "courbi.ttf"),
+    "georgia": ("georgia.ttf", "georgiab.ttf", "georgiai.ttf", "georgiaz.ttf"),
+    "segoe ui": ("segoeui.ttf", "segoeuib.ttf", "segoeuii.ttf", "segoeuiz.ttf"),
+    "segoe ui symbol": ("seguisym.ttf",) * 4,
+    "tahoma": ("tahoma.ttf", "tahomabd.ttf", "tahoma.ttf", "tahomabd.ttf"),
+    "times new roman": ("times.ttf", "timesbd.ttf", "timesi.ttf", "timesbi.ttf"),
+    "trebuchet ms": ("trebuc.ttf", "trebucbd.ttf", "trebucit.ttf", "trebucbi.ttf"),
+    "verdana": ("verdana.ttf", "verdanab.ttf", "verdanai.ttf", "verdanaz.ttf"),
+}
+_font_cache: dict = {}
+
+
+def _measure_font(family: str, bold: bool, italic: bool):
+    key = ((family or "").lower(), bool(bold), bool(italic))
+    if key in _font_cache:
+        return _font_cache[key]
+    files = _FONT_FILES.get(key[0])
+    font = None
+    if files:
+        path = os.path.join(_WIN_FONTS, files[(2 if italic else 0) + (1 if bold else 0)])
+        try:
+            font = fitz.Font(fontfile=path)
+        except Exception:
+            font = None
+    _font_cache[key] = font
+    return font
+
+
+def _text_width_pt(text: str, family: str, size: float, bold: bool, italic: bool) -> float:
+    if not text or size <= 0:
+        return 0.0
+    font = _measure_font(family, bold, italic)
+    if font is None:
+        return 0.0
+    try:
+        return font.text_length(text, size)
+    except Exception:
+        return 0.0
+
 
 _SUBSET_PREFIX = re.compile(r"^[A-Z]{6}\+")
 _STYLE_WORDS = re.compile(
