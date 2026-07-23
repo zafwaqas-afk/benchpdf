@@ -219,7 +219,7 @@ def _source_leading(cluster) -> float:
     return med
 
 
-def _paragraph_gaps(paras, lead) -> list:
+def _paragraph_gaps(paras, lead, box_height) -> list:
     """The air the source leaves above each paragraph, in points.
 
     A block used to emit its paragraphs hard against each other, because
@@ -228,6 +228,14 @@ def _paragraph_gaps(paras, lead) -> list:
     about half a line above each one, and without it the whole column runs
     together and ends short. What the source leaves is whatever exceeds the
     block's own leading, so it is only readable once that leading is known.
+
+    The gaps are clamped to the room the source actually left for them. The box
+    is sized to the source line span, which already includes those gaps, but
+    PowerPoint stacks the lines at the full leading AND then adds the gaps on
+    top - so the raw gaps overshoot the box and push the last line out the
+    bottom. On w3c_svg10_2001 p2 that dropped the final line onto the heading
+    below: 35 lines * 15.2pt = 532pt of pitch left only 112pt for gaps in a
+    644pt box, but the raw gaps summed 127. Scale them to fit the 112.
     """
     gaps = [0.0] * len(paras)
     if not lead:
@@ -235,6 +243,12 @@ def _paragraph_gaps(paras, lead) -> list:
     for i in range(1, len(paras)):
         extra = paras[i][0]["y0"] - paras[i - 1][-1]["y0"] - lead
         gaps[i] = extra if extra > 0.5 else 0.0
+    n_lines = sum(len(p) for p in paras)
+    avail = box_height - n_lines * lead
+    total = sum(gaps)
+    if total > avail and total > 0:
+        scale = max(avail, 0.0) / total
+        gaps = [g * scale for g in gaps]
     return gaps
 
 
@@ -313,7 +327,7 @@ def _add_text_block(slide, cluster, scale, off_x, off_y, fonts: FontMapper,
             paras.append(_emit_paragraph(tf, [ln], li == 0, alignment, fonts))
     else:
         split = _split_paragraphs(cluster)
-        gaps = _paragraph_gaps(split, lead)
+        gaps = _paragraph_gaps(split, lead, y1 - y0)
         for pi, para in enumerate(split):
             paras.append(_emit_paragraph(tf, para, pi == 0, alignment, fonts,
                                          gaps[pi] * scale, track_lines=wrap))
