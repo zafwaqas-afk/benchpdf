@@ -210,18 +210,47 @@ def _source_tables(src_pdf):
     return per_page
 
 
+# Ground-truth native-table count per fixture, declared HERE by reading each
+# fixture, NOT by calling the engine's own detection. _source_tables runs
+# find_tables + _infer_aligned_tables + _table_cells_tabular - the exact code
+# the engine uses - so a `want` computed from it moves in lockstep with any bug
+# in that code and can never catch one: break inference and both want and got
+# drop to zero together, silently. These literals do not move, so a lost table
+# (got < expected) or an invented one (got > expected) is a red build.
+#   bank_statement           2 ruled ledgers
+#   form_xobject_statement   1 ruled + 1 inferred
+#   tables_charts            1 ruled
+#   callout_notes            0 - its ruled 2x2 is a bordered callout, furniture
+#   everything else          0
+EXPECTED_TABLES = {
+    "bank_statement": 2,
+    "callout_notes": 0,
+    "dingbat_toc": 0,
+    "form_xobject_statement": 2,
+    "slide_deck": 0,
+    "styled_proposal": 0,
+    "tables_charts": 1,
+    "text_report": 0,
+}
+
+
 def check_tables(prs, src_pdf, res, name):
     """Every table the PDF detects must arrive as a NATIVE PowerPoint table -
     including UNRULED tables recovered from column alignment (the statement
-    ledger class). Derived from the .pptx and the source PDF, not from any
-    engine's own report, so the same assertion holds for an engine that
-    reports nothing.
+    ledger class) - and no other native table may appear. Counted against a
+    hand-declared ground truth (EXPECTED_TABLES), independent of the engine's
+    own detection, so a bug in detection or inference cannot hide by moving
+    the expectation with it. Exact match, both directions: a lost table and an
+    invented one both fail.
     """
     pages = _source_tables(src_pdf)
-    want = sum(len(p["ruled"]) + len(p["inferred"]) for p in pages)
     got = _native_tables(prs)
-    res.check(got >= want,
-              f"[{name}] every PDF table is native, ruled or not (source {want}, output {got})")
+    if name not in EXPECTED_TABLES:
+        res.check(False, f"[{name}] no declared table count - add it to EXPECTED_TABLES")
+    else:
+        want = EXPECTED_TABLES[name]
+        res.check(got == want,
+                  f"[{name}] native table count matches ground truth (expected {want}, output {got})")
 
     # each inferred (unruled) source table's text must live in a NATIVE table,
     # not in loose text boxes
