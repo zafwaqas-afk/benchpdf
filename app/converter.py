@@ -58,6 +58,7 @@ MIN_TABULAR_CELLS = 2       # one populated cell states no relationship
 PROSE_MAX_TEXT_CELLS = 3    # ... and neither does a paragraph plus a label
 NOWRAP_MAX_WORDS = 5        # blocks this short keep their source line breaks
 WORD_FIT_SAFETY = 1.1       # substituted fonts can run a little wider
+WRAP_SLACK_PT = 2.0         # breathing room at the box edge (source points)
 TRACK_MAX_EM = 0.08         # never squeeze or open more than this per char
 
 
@@ -278,6 +279,13 @@ def _add_text_block(slide, cluster, scale, off_x, off_y, fonts: FontMapper,
     w_pt = max(x1 - x0, 1.0)
     if wrap:
         w_pt = max(w_pt, WORD_FIT_SAFETY * _longest_word_width(cluster))
+        # A hair of breathing room. The box is pinned to the widest source
+        # line's exact extent, so a full line whose substitute width lands
+        # within a tenth of a point of that extent tips over PowerPoint's own
+        # metrics - which are not PyMuPDF's - and wraps one line early. Too
+        # small to drag a word across a line; just enough to clear the metric
+        # divergence at the box edge.
+        w_pt += WRAP_SLACK_PT
         if page_w:
             w_pt = min(w_pt, max(page_w - x0, x1 - x0))
 
