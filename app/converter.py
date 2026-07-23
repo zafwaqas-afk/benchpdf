@@ -612,7 +612,12 @@ def convert_pdf_to_pptx(
         # a decorative squares mark is graphics, not an empty 1xN table.
         def _has_cell_text(t):
             return any(_point_in(t.bbox, *_center(ln["bbox"])) for ln in all_lines)
-        ruled = [t for t in detected if _has_cell_text(t)]
+        # A single-column grid cannot express a tabular relationship: it is a
+        # bordered or shaded BOX, not data (a Starling statement's shaded
+        # Summary panel became a 2x1 table on the browser engine). Demoting it
+        # feeds the region to the hybrid background instead, which preserves
+        # the panel as pixels with editable text on top.
+        ruled = [t for t in detected if _has_cell_text(t) and t.col_count >= 2]
         demoted_grids = len(detected) - len(ruled)
         # Unruled tables (statement ledgers without ruling lines) are
         # recovered from column alignment and emitted native.
