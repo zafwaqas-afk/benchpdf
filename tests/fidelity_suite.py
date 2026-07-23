@@ -726,6 +726,25 @@ def check_effective_sizes(prs, src_pdf, res, name):
 
 
 def check_overlap_bounds(prs, res, name):
+    """DECLARED-geometry overlap and page bounds.
+
+    This compares the boxes the engine declares, not the pixels PowerPoint
+    renders. A text box is sized from its source cluster's height, but
+    auto_size is NONE, so PowerPoint may render the text TALLER than the
+    declared box and spill into a neighbour whose declared box does not
+    overlap at all - the body text on w3c_svg10_2001 p2 does exactly that,
+    ending under the "Available languages" heading below it.
+
+    That rendered-overlap class is deliberately NOT asserted here and cannot
+    be: the suite runs without Office, and predicting PowerPoint's wrapped
+    height means reproducing its line-breaking, which diverges from our own
+    metrics at the sub-point level (the same divergence that made boe p3's
+    wrap bistable). A ~3% overflow is indistinguishable from measurement
+    noise without rendering. It is caught instead by the corpus render-diff,
+    which uses real PowerPoint: w3c_svg10_2001 p2 is the worst-page floor
+    precisely because of this collision. Keep this check honest about its
+    scope rather than have it imply a guarantee it does not provide.
+    """
     SW, SH = prs.slide_width, prs.slide_height
     overlaps, oob = 0, 0
     for si, slide in enumerate(prs.slides):
@@ -739,7 +758,7 @@ def check_overlap_bounds(prs, res, name):
             for j in range(i + 1, len(els)):
                 if overlap_frac(e, els[j]) > OVERLAP_FRAC:
                     overlaps += 1
-    res.check(overlaps == 0, f"[{name}] no element overlaps >10% (found: {overlaps})")
+    res.check(overlaps == 0, f"[{name}] no DECLARED element boxes overlap >10% (found: {overlaps})")
     res.check(oob == 0, f"[{name}] no element past the page boundary (found: {oob})")
 
 
