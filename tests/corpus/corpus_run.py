@@ -23,7 +23,12 @@ backlog - the data the next iteration attacks.
 Usage:
   python tests/corpus/corpus_run.py                 # both corpora + triage
   python tests/corpus/corpus_run.py --set=real      # one corpus
-  python tests/corpus/corpus_run.py --rebless       # accept current as baseline
+  python tests/corpus/corpus_run.py --rebless       # advance every improved gate
+  python tests/corpus/corpus_run.py --rebless=real_median   # only the named gate(s)
+
+Reblessing is forward-only per gate: a gate whose measured value would move
+its baseline backward is left untouched, so locking one gain no longer drags
+the others down. To lower a baseline deliberately, delete it and re-run.
 """
 
 import glob
@@ -212,7 +217,17 @@ def main():
     for a in sys.argv:
         if a.startswith("--set="):
             sel = a.split("=", 1)[1]
-    rebless = "--rebless" in sys.argv
+    # --rebless           accept every improved gate as the new baseline
+    # --rebless=real_median,worst_page_floor   only the named gates
+    # Reblessing is forward-only per gate (the SITE_SPEC rule): a gate whose
+    # measured value would move its baseline BACKWARD is left untouched, so a
+    # change that lifts one gate can no longer drag the others down with it.
+    rebless = None
+    for a in sys.argv:
+        if a == "--rebless":
+            rebless = "ALL"
+        elif a.startswith("--rebless="):
+            rebless = {t.strip() for t in a.split("=", 1)[1].split(",") if t.strip()}
 
     corpora = {}
     if sel in ("both", "synthetic"):
@@ -260,12 +275,37 @@ def main():
 
     # ---- gate against the baseline ----
     gates = {k: result[k] for k in result if k.endswith("_median")}
-    gates["worst_page_floor"] = floor
-    if not os.path.exists(BASELINE) or rebless:
+    # worst_page_floor is the single lowest page across BOTH corpora; a
+    # partial run (--set) sees only some pages, so its floor is not comparable
+    # and must never be gated or reblessed from one.
+    if sel == "both":
+        gates["worst_page_floor"] = floor
+
+    if not os.path.exists(BASELINE):
         json.dump(gates, open(BASELINE, "w"), indent=1)
         print("baseline written:", {k: round(v, 4) for k, v in gates.items()})
         return 0
     base = json.load(open(BASELINE))
+
+    if rebless is not None:
+        targets = set(gates) if rebless == "ALL" else rebless
+        for k in sorted(targets):
+            if k not in gates:
+                print(f"skipped {k}: not measured in this run")
+                continue
+            v, b = gates[k], base.get(k)
+            if b is None:
+                base[k] = v
+                print(f"reblessed {k}: (new) -> {v:.4f}")
+            elif v > b:
+                base[k] = v
+                print(f"reblessed {k}: {b:.4f} -> {v:.4f}")
+            else:
+                print(f"kept {k}: {b:.4f} (measured {v:.4f} would move backward; "
+                      f"baselines only move forward)")
+        json.dump(base, open(BASELINE, "w"), indent=1)
+        return 0
+
     failed = False
     for k, v in gates.items():
         b = base.get(k)
