@@ -4,7 +4,7 @@
 ; uninstall so nothing is left behind.
 
 #define AppName     "BenchPDF"
-#define AppVersion  "1.0.3"
+#define AppVersion  "1.0.4"
 #define AppPublisher "BenchPDF"
 #define AppExe      "BenchPDF.exe"
 

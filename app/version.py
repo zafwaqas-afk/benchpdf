@@ -1,7 +1,7 @@
 """Single source of truth for the app's identity and version."""
 
 APP_NAME = "BenchPDF"
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 PUBLISHER = "BenchPDF"
 
 # Where the source is offered, to satisfy the AGPL's source-availability

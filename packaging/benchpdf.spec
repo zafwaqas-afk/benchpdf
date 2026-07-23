@@ -38,9 +38,12 @@ hiddenimports = [
     "pystray._win32",
 ]
 
-# pull data+binaries+submodules for the fiddly native/optional-import packages
+# pull data+binaries+submodules for the fiddly native/optional-import packages.
+# pystray selects its backend dynamically (pystray._win32 on Windows), so the
+# bare hiddenimport did not pull the package in and 1.0.0-1.0.3 shipped with no
+# tray icon; collect_all bundles the whole package and its backend.
 for pkg in ("fitz", "pymupdf", "pptx", "docx", "img2pdf", "pillow_heif", "PIL",
-            "fontTools", "flask", "jinja2", "werkzeug"):
+            "fontTools", "flask", "jinja2", "werkzeug", "pystray"):
     try:
         d, b, h = collect_all(pkg)
         datas += d; binaries += b; hiddenimports += h
