@@ -656,6 +656,50 @@ def _infer_aligned_tables(lines, existing_bboxes=()) -> list:
                 prev["y1"] = max(prev["y1"], row["y1"])
                 prev["cy"] = (prev["y0"] + prev["y1"]) / 2
             j += 1
+        # Absorb an aligned row directly ABOVE the run. An opening-balance line
+        # sits above the first dated row with only two values (a label and a
+        # figure), so it never starts a run, yet both values land in a column.
+        # Pull it in as the table's first row, so its label and figure inherit
+        # the TYPE and BALANCE rails instead of drifting as loose text. Strict:
+        # >= 2 spans (never a lone heading), every span anchored to an EXISTING
+        # column (opening none), and pitch-adjacent.
+        top = i
+        while top - 1 >= 0:
+            row, first = rows[top - 1], run[0]
+            if len(row["segs"]) < 2:
+                break
+            if first["cy"] - row["cy"] > _ROW_PITCH_FACTOR * max(first["size"], row["size"], 8):
+                break
+            ok, anchored, plan = True, 0, []
+            for seg in row["segs"]:
+                c = next((c for c in clusters
+                          if abs(seg["x0"] - c["x0m"]) <= _COL_TOL
+                          or abs(seg["x1"] - c["x1m"]) <= _COL_TOL), None)
+                if c is not None:
+                    anchored += 1
+                    plan.append((c, seg))
+                    continue
+                over = [c for c in clusters
+                        if min(seg["x1"], c["maxX1"]) - max(seg["x0"], c["minX0"]) > 1]
+                if (len(over) == 1 and seg["x0"] >= over[0]["minX0"] - _COL_TOL
+                        and seg["x1"] <= over[0]["maxX1"] + _COL_TOL):
+                    anchored += 1
+                    plan.append((over[0], seg))
+                    continue
+                ok = False
+                break
+            if not ok or anchored != len(row["segs"]):
+                break
+            for c, seg in plan:
+                c["x0m"] = (c["x0m"] * c["n"] + seg["x0"]) / (c["n"] + 1)
+                c["x1m"] = (c["x1m"] * c["n"] + seg["x1"]) / (c["n"] + 1)
+                c["minX0"] = min(c["minX0"], seg["x0"])
+                c["maxX1"] = max(c["maxX1"], seg["x1"])
+                c["n"] += 1
+                if _seg_is_money(seg):
+                    c["money"] += 1
+            run.insert(0, row)
+            top -= 1
         # A column needs support in >=25% of rows (min 3), so prose cannot
         # tabulate. EXCEPT a pure-money column: when every value in it is a
         # currency amount it is real even with a single entry - a statement

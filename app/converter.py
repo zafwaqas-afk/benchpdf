@@ -466,15 +466,19 @@ def _add_table(slide, table, page_lines, pix, z, scale, off_x, off_y, fonts: Fon
             rh = max(c[3] for c in rcells) - min(c[1] for c in rcells)
             table_obj.rows[ri].height = Emu(max(int(rh * scale * EMU_PER_PT), EMU_PER_PT // 3))
 
-    # Numeric alignment is a per-COLUMN property, not per-cell. A money column
-    # (OUT, BALANCE) is right-aligned in the source: every value shares one
-    # right rail while its left edge moves with the magnitude. Deciding per
-    # cell splits the column - a wide value nearly fills its cell, so its own
-    # gaps look balanced and it lands centred while narrow values land hard
-    # right. Decide once per column from the spread of the rails.
+    # Alignment is a per-COLUMN property, not per-cell. Every statement column
+    # is either left-aligned (dates, type, description hug the column's left)
+    # or right-aligned (money hugs a shared right rail while the left edge
+    # moves with magnitude). Deciding per cell mis-fires: a wide money value
+    # nearly fills its cell, so its own gaps look balanced and it centres while
+    # narrow values go right. Read the source once per column - the median gap
+    # to the left vs right of the cell - and give every cell the same verdict.
+    def _median(a):
+        s = sorted(a)
+        return s[len(s) // 2]
     col_align = [None] * ncols
     for ci in range(ncols):
-        x0s, x1s = [], []
+        lg, rg = [], []
         for ri in range(nrows):
             cb = table.rows[ri].cells[ci]
             if cb is None:
@@ -482,13 +486,16 @@ def _add_table(slide, table, page_lines, pix, z, scale, off_x, off_y, fonts: Fon
             lns = _lines_in(cb, page_lines)
             if not lns:
                 continue
-            txt = " ".join("".join(s["text"] for s in l["spans"]) for l in lns).strip()
-            if not _CELL_NUM_RE.match(txt):
-                continue
-            x0s.append(min(l["x0"] for l in lns))
-            x1s.append(max(l["x1"] for l in lns))
-        if len(x1s) >= 2 and (max(x1s) - min(x1s)) + 1 < (max(x0s) - min(x0s)):
-            col_align[ci] = PP_ALIGN.RIGHT
+            lg.append(min(l["x0"] for l in lns) - cb[0])
+            rg.append(cb[2] - max(l["x1"] for l in lns))
+        if len(lg) >= 2:
+            L, R = _median(lg), _median(rg)
+            # clear winner only; a balanced column is genuinely centred, so
+            # leave it to the default rather than force a side.
+            if R + 1 < L:
+                col_align[ci] = PP_ALIGN.RIGHT
+            elif L + 1 < R:
+                col_align[ci] = PP_ALIGN.LEFT
 
     for ri in range(nrows):
         for ci in range(ncols):
