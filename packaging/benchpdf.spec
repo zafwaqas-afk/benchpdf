@@ -36,6 +36,10 @@ hiddenimports = [
     "win32com", "win32com.client", "win32timezone", "pythoncom", "pywintypes",
     # tray backend
     "pystray._win32",
+    # office_com uses psutil to reap orphaned Word/Excel processes; it is a
+    # module-level import in app.office_com, which app.server imports at
+    # startup, so a missing psutil crashes the whole GUI before the tray.
+    "psutil",
 ]
 
 # pull data+binaries+submodules for the fiddly native/optional-import packages.
@@ -43,7 +47,7 @@ hiddenimports = [
 # bare hiddenimport did not pull the package in and 1.0.0-1.0.3 shipped with no
 # tray icon; collect_all bundles the whole package and its backend.
 for pkg in ("fitz", "pymupdf", "pptx", "docx", "img2pdf", "pillow_heif", "PIL",
-            "fontTools", "flask", "jinja2", "werkzeug", "pystray"):
+            "fontTools", "flask", "jinja2", "werkzeug", "pystray", "psutil"):
     try:
         d, b, h = collect_all(pkg)
         datas += d; binaries += b; hiddenimports += h
