@@ -278,7 +278,7 @@ def _paragraph_indents(paras, block_x0) -> list:
 
 
 def _add_text_block(slide, cluster, scale, off_x, off_y, fonts: FontMapper,
-                    page_w: float = 0.0):
+                    page_w: float = 0.0, right_rail: bool = False):
     x0 = min(c["x0"] for c in cluster)
     y0 = min(c["y0"] for c in cluster)
     x1 = max(c["x1"] for c in cluster)
@@ -321,7 +321,9 @@ def _add_text_block(slide, cluster, scale, off_x, off_y, fonts: FontMapper,
     tf.margin_bottom = 0
 
     lead = _source_leading(cluster)
-    alignment = _line_alignment(cluster, x0, x1)
+    # a single-line block on a shared right rail is a right-aligned column
+    # value; _line_alignment cannot see that from one line, so pin it here.
+    alignment = _line_alignment(cluster, x0, x1) or (PP_ALIGN.RIGHT if right_rail else None)
     paras, indents = [], None
     if no_wrap_short:
         # one paragraph per source line: the layout is the source's, verbatim
@@ -732,8 +734,25 @@ def convert_pdf_to_pptx(
 
         # ---- loose text as logical blocks ----
         loose_lines = _attach_markers(loose_lines)
-        for cluster in _cluster_lines(loose_lines):
-            _add_text_block(slide, cluster, scale, off_x, off_y, fonts, pw)
+        text_clusters = _cluster_lines(loose_lines)
+        # A right-aligned COLUMN of one-line blocks. Statement values (account
+        # details, a summary panel) stack as separate single-line clusters that
+        # share an exact right edge in the source; rendered left-anchored with a
+        # substituted font, that edge goes ragged. Find right edges that >= 3
+        # single-line clusters share, whose left edges do NOT also line up, and
+        # right-align those blocks so the edge stays crisp.
+        _RAIL_TOL = 1.5
+        singles = [cl for cl in text_clusters if len(cl) == 1]
+        sX1 = [cl[0]["x1"] for cl in singles]
+        sX0 = [cl[0]["x0"] for cl in singles]
+        _on = lambda vals, v: sum(1 for x in vals if abs(x - v) <= _RAIL_TOL)
+        right_rail = set()
+        for idx, cl in enumerate(text_clusters):
+            if len(cl) == 1 and _on(sX1, cl[0]["x1"]) >= 3 and _on(sX0, cl[0]["x0"]) < 3:
+                right_rail.add(id(cl))
+        for cluster in text_clusters:
+            _add_text_block(slide, cluster, scale, off_x, off_y, fonts, pw,
+                            id(cluster) in right_rail)
             pr.text_boxes += 1
 
         pr.substituted_fonts = [f"{k} -> {v}" for k, v in sorted(fonts.substitutions.items())]
