@@ -397,7 +397,7 @@ def _table_cells_tabular(table, lines) -> bool:
     return True
 
 
-def _fill_cell(cell, para_lines, fonts: FontMapper, fill_rgb, is_dark, cb=None):
+def _fill_cell(cell, para_lines, fonts: FontMapper, fill_rgb, is_dark, cb=None, col_align=None):
     cell.fill.solid()
     cell.fill.fore_color.rgb = RGBColor(*fill_rgb)
     cell.margin_left = Pt(4)
@@ -422,8 +422,11 @@ def _fill_cell(cell, para_lines, fonts: FontMapper, fill_rgb, is_dark, cb=None):
     # under IN). Only when the source right-aligns it: a left-aligned number is
     # left as-is, so ordinary numeric tables are unchanged.
     text = " ".join("".join(s["text"] for s in l["spans"]) for l in para_lines).strip()
-    align = None
-    if cb is not None and _CELL_NUM_RE.match(text):
+    # The column verdict wins; fall back to the per-cell right-hug test only for
+    # a lone numeric value (an IN column with a single payment), where a column
+    # has no spread to read.
+    align = col_align
+    if align is None and cb is not None and _CELL_NUM_RE.match(text):
         cx0 = min(l["x0"] for l in para_lines)
         cx1 = max(l["x1"] for l in para_lines)
         if (cb[2] - cx1) < (cx0 - cb[0]) - 2:
@@ -463,6 +466,30 @@ def _add_table(slide, table, page_lines, pix, z, scale, off_x, off_y, fonts: Fon
             rh = max(c[3] for c in rcells) - min(c[1] for c in rcells)
             table_obj.rows[ri].height = Emu(max(int(rh * scale * EMU_PER_PT), EMU_PER_PT // 3))
 
+    # Numeric alignment is a per-COLUMN property, not per-cell. A money column
+    # (OUT, BALANCE) is right-aligned in the source: every value shares one
+    # right rail while its left edge moves with the magnitude. Deciding per
+    # cell splits the column - a wide value nearly fills its cell, so its own
+    # gaps look balanced and it lands centred while narrow values land hard
+    # right. Decide once per column from the spread of the rails.
+    col_align = [None] * ncols
+    for ci in range(ncols):
+        x0s, x1s = [], []
+        for ri in range(nrows):
+            cb = table.rows[ri].cells[ci]
+            if cb is None:
+                continue
+            lns = _lines_in(cb, page_lines)
+            if not lns:
+                continue
+            txt = " ".join("".join(s["text"] for s in l["spans"]) for l in lns).strip()
+            if not _CELL_NUM_RE.match(txt):
+                continue
+            x0s.append(min(l["x0"] for l in lns))
+            x1s.append(max(l["x1"] for l in lns))
+        if len(x1s) >= 2 and (max(x1s) - min(x1s)) + 1 < (max(x0s) - min(x0s)):
+            col_align[ci] = PP_ALIGN.RIGHT
+
     for ri in range(nrows):
         for ci in range(ncols):
             cb = table.rows[ri].cells[ci]
@@ -474,7 +501,7 @@ def _add_table(slide, table, page_lines, pix, z, scale, off_x, off_y, fonts: Fon
             fill = _sample_fill(pix, cb, z)
             is_dark = (fill[0] + fill[1] + fill[2]) < 384
             cell_lines = _lines_in(cb, page_lines)
-            _fill_cell(cell, cell_lines, fonts, fill, is_dark, cb)
+            _fill_cell(cell, cell_lines, fonts, fill, is_dark, cb, col_align[ci])
     return True
 
 
