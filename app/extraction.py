@@ -542,6 +542,16 @@ class InferredTable:
         self.inferred = True
 
 
+# A money value: a currency symbol on digits (a statement's IN/OUT/BALANCE).
+# Strict on purpose - a plain number is not enough - so it only fires on
+# financial columns, never on the aligned prose of an instruction form.
+_MONEY_RE = re.compile(r"^[£$€]\s?-?[\d,]+(\.\d{1,2})?$")
+
+
+def _seg_is_money(seg) -> bool:
+    return bool(_MONEY_RE.match("".join(s["text"] for s in seg["spans"]).strip()))
+
+
 def _group_rows(lines):
     rows = []
     for ln in sorted(lines, key=lambda l: (l["y0"], l["x0"])):
@@ -572,7 +582,8 @@ def _infer_aligned_tables(lines, existing_bboxes=()) -> list:
         if len(start["segs"]) < _MIN_COLS:
             i += 1
             continue
-        clusters = [{"x0m": s["x0"], "x1m": s["x1"], "minX0": s["x0"], "maxX1": s["x1"], "n": 1}
+        clusters = [{"x0m": s["x0"], "x1m": s["x1"], "minX0": s["x0"], "maxX1": s["x1"],
+                     "n": 1, "money": 1 if _seg_is_money(s) else 0}
                     for s in start["segs"]]
         run = [start]
         j = i + 1
@@ -605,14 +616,23 @@ def _infer_aligned_tables(lines, existing_bboxes=()) -> list:
                     c["minX0"] = min(c["minX0"], seg["x0"])
                     c["maxX1"] = max(c["maxX1"], seg["x1"])
                     c["n"] += 1
+                    if _seg_is_money(seg):
+                        c["money"] += 1
                 else:
                     clusters.append({"x0m": seg["x0"], "x1m": seg["x1"],
-                                     "minX0": seg["x0"], "maxX1": seg["x1"], "n": 1})
+                                     "minX0": seg["x0"], "maxX1": seg["x1"],
+                                     "n": 1, "money": 1 if _seg_is_money(seg) else 0})
             run.append(row)
             j += 1
-        # a column needs support in >=25% of rows (min 3): money-in columns
-        # are legitimately sparse, but a one-off stray is not a column
-        supported = [c for c in clusters if c["n"] >= max(3, -(-len(run) // 4))]
+        # A column needs support in >=25% of rows (min 3), so prose cannot
+        # tabulate. EXCEPT a pure-money column: when every value in it is a
+        # currency amount it is real even with a single entry - a statement
+        # period with one payment IN still has an IN column, and dropping it
+        # collapses IN into OUT. Currency-gated, so instruction forms (no
+        # currency anywhere) are unaffected and keep the strict rule.
+        thr = max(3, -(-len(run) // 4))
+        supported = [c for c in clusters
+                     if c["n"] >= thr or (c["money"] >= 1 and c["money"] == c["n"])]
         dense = sum(1 for r in run if len(r["segs"]) >= _MIN_COLS)
         if len(run) >= _MIN_DATA_ROWS + 1 and len(supported) >= _MIN_COLS and dense >= _MIN_DATA_ROWS:
             tables.append(_build_inferred_table(run, supported))

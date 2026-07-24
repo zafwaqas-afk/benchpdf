@@ -24,6 +24,7 @@ One PDF page => one slide. The engine works structurally, not by screenshotting:
 from __future__ import annotations
 
 import io
+import re
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -60,6 +61,7 @@ NOWRAP_MAX_WORDS = 5        # blocks this short keep their source line breaks
 WORD_FIT_SAFETY = 1.1       # substituted fonts can run a little wider
 WRAP_SLACK_PT = 2.0         # breathing room at the box edge (source points)
 TRACK_MAX_EM = 0.08         # never squeeze or open more than this per char
+_CELL_NUM_RE = re.compile(r"^[£$€]?\s?-?[\d,]+(\.\d+)?%?$")  # right-align numeric cells
 
 
 # --------------------------------------------------------------------------- #
@@ -395,7 +397,7 @@ def _table_cells_tabular(table, lines) -> bool:
     return True
 
 
-def _fill_cell(cell, para_lines, fonts: FontMapper, fill_rgb, is_dark):
+def _fill_cell(cell, para_lines, fonts: FontMapper, fill_rgb, is_dark, cb=None):
     cell.fill.solid()
     cell.fill.fore_color.rgb = RGBColor(*fill_rgb)
     cell.margin_left = Pt(4)
@@ -414,9 +416,21 @@ def _fill_cell(cell, para_lines, fonts: FontMapper, fill_rgb, is_dark):
         tf.paragraphs[0].font.size = Pt(6)
         return
     para_lines = sorted(para_lines, key=lambda l: (round(l["y0"], 1), l["x0"]))
+    # A numeric cell whose content hugs the RIGHT of its source cell (money,
+    # balances) stays right-aligned, or left-aligning it in a wide reconstructed
+    # cell floats the value toward the neighbour column (an OUT amount drifting
+    # under IN). Only when the source right-aligns it: a left-aligned number is
+    # left as-is, so ordinary numeric tables are unchanged.
+    text = " ".join("".join(s["text"] for s in l["spans"]) for l in para_lines).strip()
+    align = None
+    if cb is not None and _CELL_NUM_RE.match(text):
+        cx0 = min(l["x0"] for l in para_lines)
+        cx1 = max(l["x1"] for l in para_lines)
+        if (cb[2] - cx1) < (cx0 - cb[0]) - 2:
+            align = PP_ALIGN.RIGHT
     paras = _split_paragraphs(para_lines)
     for pi, para in enumerate(paras):
-        _emit_paragraph(tf, para, pi == 0, None, fonts)
+        _emit_paragraph(tf, para, pi == 0, align, fonts)
 
 
 def _add_table(slide, table, page_lines, pix, z, scale, off_x, off_y, fonts: FontMapper):
@@ -460,7 +474,7 @@ def _add_table(slide, table, page_lines, pix, z, scale, off_x, off_y, fonts: Fon
             fill = _sample_fill(pix, cb, z)
             is_dark = (fill[0] + fill[1] + fill[2]) < 384
             cell_lines = _lines_in(cb, page_lines)
-            _fill_cell(cell, cell_lines, fonts, fill, is_dark)
+            _fill_cell(cell, cell_lines, fonts, fill, is_dark, cb)
     return True
 
 
