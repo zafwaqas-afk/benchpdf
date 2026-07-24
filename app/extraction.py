@@ -591,23 +591,44 @@ def _infer_aligned_tables(lines, existing_bboxes=()) -> list:
             row, prev = rows[j], run[-1]
             if row["cy"] - prev["cy"] > _ROW_PITCH_FACTOR * max(prev["size"], row["size"], 8):
                 break
-            if len(row["segs"]) < 2:
-                break
-            matched, plan, ok = 0, [], True
+            # Classify each span: land on a rail, fold into ONE existing column
+            # (a wrapped continuation), open a clean new column, or straddle two
+            # columns (a hard break).
+            matched, anchored, plan, ok = 0, 0, [], True
             for seg in row["segs"]:
                 c = next((c for c in clusters
                           if abs(seg["x0"] - c["x0m"]) <= _COL_TOL
                           or abs(seg["x1"] - c["x1m"]) <= _COL_TOL), None)
                 if c is not None:
                     matched += 1
+                    anchored += 1
                     plan.append((c, seg))
-                elif not any(min(seg["x1"], c["maxX1"]) - max(seg["x0"], c["minX0"]) > 1
-                             for c in clusters):
+                    continue
+                over = [c for c in clusters
+                        if min(seg["x1"], c["maxX1"]) - max(seg["x0"], c["minX0"]) > 1]
+                if not over:
                     plan.append((None, seg))
+                elif (len(over) == 1 and seg["x0"] >= over[0]["minX0"] - _COL_TOL
+                      and seg["x1"] <= over[0]["maxX1"] + _COL_TOL):
+                    anchored += 1
+                    plan.append((over[0], seg))
                 else:
                     ok = False
                     break
-            if not ok or matched < 2:
+            if not ok:
+                break
+            new_cols = sum(1 for c, _ in plan if c is None)
+            # A data row lands >=2 spans on rails. Otherwise the only extension
+            # is a WRAPPED CONTINUATION - every span folded into an existing
+            # column, opening none - and only inside an established money ledger
+            # (a column with >=2 currency values). Instruction forms have no
+            # money column, so their aligned prose never folds and the strict
+            # run-breaker holds where a looser one wrecked the corpus.
+            money_ledger = any(c["money"] >= 2 for c in clusters)
+            is_data = matched >= 2
+            is_cont = (money_ledger and anchored >= 1
+                       and anchored == len(row["segs"]) and new_cols == 0)
+            if not is_data and not is_cont:
                 break
             for c, seg in plan:
                 if c is not None:
@@ -622,7 +643,18 @@ def _infer_aligned_tables(lines, existing_bboxes=()) -> list:
                     clusters.append({"x0m": seg["x0"], "x1m": seg["x1"],
                                      "minX0": seg["x0"], "maxX1": seg["x1"],
                                      "n": 1, "money": 1 if _seg_is_money(seg) else 0})
-            run.append(row)
+            if is_data:
+                run.append(row)
+            else:
+                # fold the continuation into the PREVIOUS row: extend its extent
+                # and absorb its spans, so the description becomes a 2-line cell
+                # rather than a separate ghost row (which overspilled/fragmented).
+                # Recompute the centre from the extended extent, else the next
+                # row sits ~2 line-heights below this row's FIRST baseline and
+                # trips the pitch gate, re-fragmenting the ledger.
+                prev["segs"].extend(row["segs"])
+                prev["y1"] = max(prev["y1"], row["y1"])
+                prev["cy"] = (prev["y0"] + prev["y1"]) / 2
             j += 1
         # A column needs support in >=25% of rows (min 3), so prose cannot
         # tabulate. EXCEPT a pure-money column: when every value in it is a
